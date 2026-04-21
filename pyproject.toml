@@ -11,9 +11,15 @@ dependencies = [
     "bleach>=6.0",
     "markdown>=3.5",
 ]
+license = "MIT"
 
 [project.scripts]
 chat2html = "chat2html.cli:main"
+
+[project.urls]
+homepage = "https://github.com/chezou/chat2html"
+repository = "https://github.com/chezou/chat2html"
+issues = "https://github.com/chezou/chat2html/issues"
 
 [build-system]
 requires = ["uv_build>=0.11.3,<0.12.0"]
