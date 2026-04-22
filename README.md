@@ -1,6 +1,13 @@
 # chat2html
 
-Convert Claude conversation logs into standalone static HTML files.
+Share-conscious HTML exporter for Claude conversations.
+
+## Why chat2html?
+
+- **Three formats, one tool** — Auto-detects Claude Code JSONL, claude.ai exports, and claude-chat-exporter Markdown.
+- **Safer sharing defaults** — Tool results are omitted and OAuth URLs (with `state`, `code`, `token`, callback paths) are redacted by default. Use `--full` only when you need the full picture for yourself.
+- **Self-contained output** — One HTML file with light/dark themes, syntax highlighting, and collapsible thinking blocks and long pastes.
+- **Zero install** — `uvx --from git+https://github.com/chezou/chat2html chat2html session.jsonl`.
 
 ## Supported input formats (auto-detected)
 
@@ -62,3 +69,24 @@ chat2html a.md b.jsonl -d out/
 | `--all` | Convert all conversations (claude.ai export). |
 | `--lang {ja,en}` | Output language (default: `ja`). |
 | `--full` | Show full tool input/output. By default, `tool_result` is omitted and `tool_use` only shows description-like fields for safer sharing. OAuth-related URLs are always masked, even with `--full`. |
+
+## ⚠️ What chat2html does NOT protect against
+
+chat2html redacts OAuth URLs and omits tool results by default, but it is **not a general-purpose secret scrubber**. Before sharing any output, you should still review it for:
+
+- API keys and tokens (e.g., `sk-ant-...`, `ghp_...`) that may appear in tool inputs or assistant text
+- Personal file paths (`/Users/yourname/...`, `C:\Users\...`)
+- Internal hostnames, repository names, or IP addresses
+- PII in pasted content (emails, phone numbers, etc.)
+- Long pastes are collapsed into `<details>` but **still present in the HTML source** — they're hidden visually, not removed.
+
+If you need stronger guarantees, consider running a secret scanner (e.g., `gitleaks`, `trufflehog`) on the output before sharing.
+
+### Extra safety: scan the output before sharing
+
+chat2html does not detect arbitrary secrets like API keys or tokens embedded in conversation content. If you're sharing with a wide audience, pipe the output through a dedicated secret scanner:
+
+- **[gitleaks](https://github.com/gitleaks/gitleaks)** — `gitleaks dir out.html -v`
+- **[trufflehog](https://github.com/trufflesecurity/trufflehog)** — `trufflehog filesystem out.html`
+
+Both are open-source CLIs available via Homebrew and most package managers.
