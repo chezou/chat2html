@@ -1,34 +1,44 @@
 """Smoke tests for each parser.
 
-Goal: lock in the high-level shape of each parser's output so the Phase 1
-refactor can be verified by running these tests.
+Goal: lock in the high-level shape of each parser's output. Where useful,
+assert directly on the IR (Block types) instead of rendered HTML; where
+HTML rendering matters, render the message and check the resulting string.
 """
 
 import json
 
 from chat2html.cli import (
+    TextBlock,
+    ThinkingBlock,
+    ToolUseBlock,
     load_claudeai_export,
     parse_cc_jsonl,
     parse_claudeai_conversation,
     parse_codex_jsonl,
     parse_markdown,
+    render_message,
 )
+
+
+def _bodies(messages):
+    return "\n".join(render_message(m) for m in messages)
+
 
 # ─── Markdown ──────────────────────────────────────────────
 
 
 def test_markdown_title_and_message_count(markdown_text):
-    title, created, messages = parse_markdown(markdown_text)
+    title, _created, messages = parse_markdown(markdown_text)
     assert title == "Sample Conversation"
     # 2 user turns + 2 assistant turns
     assert len(messages) == 4
-    assert messages[0]["role"] == "human"
-    assert messages[1]["role"] == "assistant"
+    assert messages[0].role == "human"
+    assert messages[1].role == "assistant"
 
 
 def test_markdown_first_message_body_includes_query(markdown_text):
     _, _, messages = parse_markdown(markdown_text)
-    assert "reverse a list" in messages[0]["body_html"]
+    assert "reverse a list" in render_message(messages[0])
 
 
 # ─── claude.ai export ──────────────────────────────────────
@@ -46,8 +56,8 @@ def test_claudeai_parse_first_conversation(claudeai_text):
     assert title == "Reversing lists in Python"
     assert created.startswith("2026-01-15")
     assert len(messages) == 2
-    assert messages[0]["role"] == "human"
-    assert messages[1]["role"] == "assistant"
+    assert messages[0].role == "human"
+    assert messages[1].role == "assistant"
 
 
 # ─── Claude Code JSONL ─────────────────────────────────────
@@ -60,15 +70,25 @@ def test_cc_jsonl_basic_shape(cc_text):
     # 2 user turns (the second is a tool_result-only message which is dropped)
     # + 2 assistant bubbles. Tool-result-only user messages are skipped.
     assert len(messages) == 3
-    assert messages[0]["role"] == "human"
-    assert messages[1]["role"] == "assistant"
-    assert messages[2]["role"] == "assistant"
+    assert [m.role for m in messages] == ["human", "assistant", "assistant"]
 
 
-def test_cc_jsonl_assistant_includes_tool_use(cc_text):
+def test_cc_jsonl_assistant_block_types(cc_text):
+    """The first assistant turn should be: thinking + text + tool_use."""
     _, _, messages = parse_cc_jsonl(cc_text)
-    assistant_html = messages[1]["body_html"]
-    # tool_use rendered as a <details class="tool-call"> block
+    block_types = [type(b).__name__ for b in messages[1].blocks]
+    assert block_types == ["ThinkingBlock", "TextBlock", "ToolUseBlock"]
+    tool = messages[1].blocks[2]
+    assert isinstance(tool, ToolUseBlock)
+    assert tool.name == "Bash"
+    # The tool result was paired in by the parser.
+    assert tool.result is not None
+    assert "users.py" in tool.result
+
+
+def test_cc_jsonl_assistant_renders_tool_call(cc_text):
+    _, _, messages = parse_cc_jsonl(cc_text)
+    assistant_html = render_message(messages[1])
     assert "tool-call" in assistant_html
     assert "Bash" in assistant_html
 
@@ -83,44 +103,58 @@ def test_codex_basic_shape(codex_text):
     # 2 user turns + 2 assistant bubbles (one per turn, with all assistant
     # text/reasoning/tool calls coalesced).
     assert len(messages) == 4
-    assert messages[0]["role"] == "human"
-    assert messages[1]["role"] == "assistant"
-    assert messages[2]["role"] == "human"
-    assert messages[3]["role"] == "assistant"
+    assert [m.role for m in messages] == ["human", "assistant", "human", "assistant"]
 
 
 def test_codex_filters_developer_and_environment_context(codex_text):
     _, _, messages = parse_codex_jsonl(codex_text)
-    bodies = "\n".join(m["body_html"] for m in messages)
-    # System prompt under developer role must be filtered out.
+    bodies = _bodies(messages)
     assert "permissions instructions" not in bodies
-    # Auto-saved approval notice (also developer role) must be filtered.
     assert "Approved command prefix saved" not in bodies
-    # environment_context user injection must be filtered.
     assert "<environment_context>" not in bodies
 
 
 def test_codex_assistant_uses_codex_role_label(codex_text):
     _, _, messages = parse_codex_jsonl(codex_text)
-    assistants = [m for m in messages if m["role"] == "assistant"]
-    assert all(m.get("role_label") == "Codex" for m in assistants)
+    assistants = [m for m in messages if m.role == "assistant"]
+    assert all(m.role_label == "Codex" for m in assistants)
 
 
-def test_codex_renders_function_call_with_paired_output(codex_text):
+def test_codex_turn1_block_types(codex_text):
+    """Turn 1 assistant: text, two parallel exec_command, thinking summary,
+    text, apply_patch, pytest exec_command, final text."""
     _, _, messages = parse_codex_jsonl(codex_text)
-    turn1_assistant = messages[1]["body_html"]
-    # Two parallel exec_command calls + one pytest exec_command in turn 1.
-    assert turn1_assistant.count("exec_command") >= 3
-    # custom_tool_call (apply_patch) also rendered.
-    assert "apply_patch" in turn1_assistant
+    block_types = [type(b).__name__ for b in messages[1].blocks]
+    # 4 ToolUseBlocks (3 exec_command + 1 apply_patch), 1 ThinkingBlock,
+    # and 3 TextBlocks (intro, mid, closing).
+    assert block_types.count("ToolUseBlock") == 4
+    assert block_types.count("ThinkingBlock") == 1
+    assert block_types.count("TextBlock") == 3
+    # apply_patch is a custom_tool_call.
+    tool_names = [b.name for b in messages[1].blocks if isinstance(b, ToolUseBlock)]
+    assert tool_names.count("exec_command") == 3
+    assert "apply_patch" in tool_names
+
+
+def test_codex_function_call_paired_with_output(codex_text):
+    _, _, messages = parse_codex_jsonl(codex_text)
+    tools = [b for b in messages[1].blocks if isinstance(b, ToolUseBlock)]
+    # All 4 tool calls in turn 1 had matching outputs.
+    assert all(t.result is not None for t in tools)
+    # The first exec_command was `ls users.py`.
+    ls_tool = next(t for t in tools if t.input.get("cmd") == "ls users.py")
+    assert "users.py" in ls_tool.result
 
 
 def test_codex_renders_non_empty_reasoning_summary(codex_text):
     _, _, messages = parse_codex_jsonl(codex_text)
-    turn1_assistant = messages[1]["body_html"]
-    # The fixture has one non-empty reasoning summary in turn 1.
-    assert "thinking" in turn1_assistant
-    assert "the refactor is to define the new signature" in turn1_assistant
+    # Turn 1 has exactly one non-empty ThinkingBlock.
+    thinks = [b for b in messages[1].blocks if isinstance(b, ThinkingBlock)]
+    assert len(thinks) == 1
+    assert "the refactor is to define the new signature" in thinks[0].text
+    # And it shows up in the rendered HTML.
+    assistant_html = render_message(messages[1])
+    assert "thinking" in assistant_html
 
 
 def test_codex_user_message_quoting_env_context_is_kept():
@@ -179,15 +213,16 @@ def test_codex_user_message_quoting_env_context_is_kept():
     )
     title, _, messages = parse_codex_jsonl(text)
     assert len(messages) == 2
-    assert messages[0]["role"] == "human"
-    assert "What does that block do?" in messages[0]["body_html"]
-    # The title is derived from the first user prompt (truncated to 60 chars
-    # if needed), so the kept message must drive it — not the default fallback.
+    assert messages[0].role == "human"
+    assert isinstance(messages[0].blocks[0], TextBlock)
+    assert "What does that block do?" in messages[0].blocks[0].text
+    # Title comes from the first user prompt (truncated to 60 chars).
     assert title.startswith("Why does my prompt include")
 
 
 def test_codex_unmatched_function_call_still_renders():
-    """A function_call without a matching function_call_output should still render."""
+    """A function_call without a matching function_call_output should still
+    appear as a ToolUseBlock with result=None."""
     text = "\n".join(
         [
             json.dumps(
@@ -223,6 +258,10 @@ def test_codex_unmatched_function_call_still_renders():
         ]
     )
     _, _, messages = parse_codex_jsonl(text)
-    # 1 user + 1 assistant bubble containing the orphan tool call
     assert len(messages) == 2
-    assert "exec_command" in messages[1]["body_html"]
+    tools = [b for b in messages[1].blocks if isinstance(b, ToolUseBlock)]
+    assert len(tools) == 1
+    assert tools[0].name == "exec_command"
+    assert tools[0].result is None
+    # And the rendered HTML still includes the tool name.
+    assert "exec_command" in render_message(messages[1])

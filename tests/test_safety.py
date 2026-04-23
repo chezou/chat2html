@@ -1,7 +1,12 @@
 """Tests for the safety mechanisms: OAuth URL masking and --full toggle."""
 
 from chat2html import cli
-from chat2html.cli import _is_oauth_url, _mask_oauth_urls, _render_tool_use_block
+from chat2html.cli import (
+    ToolUseBlock,
+    _is_oauth_url,
+    _mask_oauth_urls,
+    _render_tool_use_block,
+)
 
 # ─── OAuth URL detection ───────────────────────────────────
 
@@ -49,13 +54,12 @@ def test_mask_leaves_plain_url_alone():
 
 def test_safe_mode_omits_tool_result():
     cli._FULL = False
-    tool_use = {
-        "name": "Bash",
-        "input": {"command": "rm -rf /important/path"},
-        "id": "t1",
-    }
-    tool_result = {"content": [{"type": "text", "text": "secret data"}]}
-    html = _render_tool_use_block(tool_use, tool_result)
+    block = ToolUseBlock(
+        name="Bash",
+        input={"command": "rm -rf /important/path"},
+        result="secret data",
+    )
+    html = _render_tool_use_block(block)
     # Result is omitted entirely.
     assert "secret data" not in html
     # The bare command is also omitted ("command" is not in SAFE_TOOL_USE_FIELDS).
@@ -67,12 +71,12 @@ def test_safe_mode_omits_tool_result():
 
 def test_safe_mode_keeps_description_field():
     cli._FULL = False
-    tool_use = {
-        "name": "Bash",
-        "input": {"command": "rm -rf x", "description": "tidy up"},
-        "id": "t1",
-    }
-    html = _render_tool_use_block(tool_use, None)
+    block = ToolUseBlock(
+        name="Bash",
+        input={"command": "rm -rf x", "description": "tidy up"},
+        result=None,
+    )
+    html = _render_tool_use_block(block)
     assert "tidy up" in html
     assert "rm -rf x" not in html
 
@@ -80,9 +84,12 @@ def test_safe_mode_keeps_description_field():
 def test_full_mode_shows_tool_input_and_result():
     cli._FULL = True
     try:
-        tool_use = {"name": "Bash", "input": {"command": "ls"}, "id": "t1"}
-        tool_result = {"content": [{"type": "text", "text": "file_a.py"}]}
-        html = _render_tool_use_block(tool_use, tool_result)
+        block = ToolUseBlock(
+            name="Bash",
+            input={"command": "ls"},
+            result="file_a.py",
+        )
+        html = _render_tool_use_block(block)
         assert "ls" in html
         assert "file_a.py" in html
     finally:
