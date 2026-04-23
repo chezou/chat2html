@@ -24,6 +24,11 @@ Share-conscious HTML exporter for Claude conversations.
    - See <https://github.com/agarwalvishal/claude-chat-exporter>.
    - Uses `## Human (date):` / `## Claude:` headers.
 
+4. **OpenAI Codex CLI session** (`~/.codex/sessions/*.jsonl`)
+   - Line-based logs with top-level `{timestamp, type, payload}`.
+   - Renders user / assistant text, `function_call` + `function_call_output` pairs (e.g. `exec_command`), and `custom_tool_call` (e.g. `apply_patch`).
+   - Encrypted reasoning is omitted; visible `reasoning.summary` is rendered as a `thinking` block.
+
 ## Quickstart
 
 Run directly from the GitHub repository with `uv` — no install required:
@@ -90,3 +95,13 @@ chat2html does not detect arbitrary secrets like API keys or tokens embedded in 
 - **[trufflehog](https://github.com/trufflesecurity/trufflehog)** — `trufflehog filesystem out.html`
 
 Both are open-source CLIs available via Homebrew and most package managers.
+
+## Development
+
+```sh
+uv sync --all-groups   # install runtime + dev dependencies
+uv run pytest          # run the test suite
+uv run ruff check .    # lint
+```
+
+CI runs the same `ruff check` + `pytest` on every push and PR (see `.github/workflows/ci.yml`).
