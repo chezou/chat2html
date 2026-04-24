@@ -130,9 +130,12 @@ def parse_codex_jsonl(jsonl_text: str) -> tuple[str, str, list[Message]]:
         if not line:
             continue
         try:
-            records.append(json.loads(line))
+            rec = json.loads(line)
         except json.JSONDecodeError:
             continue
+        # Lines that parse to non-dict would crash on rec.get(...) below.
+        if isinstance(rec, dict):
+            records.append(rec)
 
     outputs_by_call_id = _extract_codex_outputs(records)
 

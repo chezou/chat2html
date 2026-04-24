@@ -31,9 +31,12 @@ def load_claudeai_export(text: str) -> list[dict]:
             continue
         try:
             obj = json.loads(line)
-            conversations.append(obj)
         except json.JSONDecodeError:
             continue
+        # JSONL lines that parse to non-dict (null, [], a string) would
+        # later crash on `conv.get(...)`; skip them.
+        if isinstance(obj, dict):
+            conversations.append(obj)
     return conversations
 
 

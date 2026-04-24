@@ -87,9 +87,12 @@ def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[Message]]:
         if not line:
             continue
         try:
-            records.append(json.loads(line))
+            rec = json.loads(line)
         except json.JSONDecodeError:
             continue
+        # Lines that parse to non-dict would crash on rec.get(...) below.
+        if isinstance(rec, dict):
+            records.append(rec)
 
     # Map of tool_use_id -> tool_result.
     tool_results_by_id: dict[str, dict] = {}

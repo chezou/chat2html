@@ -56,14 +56,18 @@ def detect_format(path: str, text: str) -> str:
                 # Claude Code markers: type, uuid, sessionId
                 if "sessionId" in obj or ("type" in obj and "uuid" in obj):
                     return FORMAT_CC_JSONL
-                # Peek at further records to decide.
-                for line in stripped.split("\n")[:20]:
+                # Peek at the next ~20 records to decide. Use a bounded split
+                # so we don't materialise every line of a multi-MB JSONL just
+                # to sniff the format.
+                for line in stripped.split("\n", 20)[:20]:
                     line = line.strip()
                     if not line:
                         continue
                     try:
                         o = json.loads(line)
                     except json.JSONDecodeError:
+                        continue
+                    if not isinstance(o, dict):
                         continue
                     if "chat_messages" in o:
                         return FORMAT_CLAUDEAI

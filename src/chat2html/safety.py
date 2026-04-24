@@ -8,7 +8,11 @@ which feeds the page title) cannot leak into the exported HTML.
 import re
 
 # Regex that captures the whole URL.
-# Trailing punctuation and closing brackets are excluded from the match.
+# This deliberately allows trailing punctuation/closing brackets to match
+# (since URLs can legitimately contain them); _mask_oauth_urls() then peels
+# common trailing punctuation back off the end before deciding whether to
+# redact, so e.g. "see https://x/oauth/cb?state=y." keeps the period
+# outside the redacted span.
 _URL_RE = re.compile(r"https?://[^\s<>\"'`\\]+")
 
 # If any of these parameter names appear in the query/fragment,
