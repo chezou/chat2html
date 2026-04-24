@@ -1,0 +1,66 @@
+[
+  {
+    "uuid": "conv-0001",
+    "name": "Reversing lists in Python",
+    "created_at": "2026-01-15T10:00:00.000Z",
+    "updated_at": "2026-01-15T10:01:00.000Z",
+    "chat_messages": [
+      {
+        "uuid": "msg-0001",
+        "sender": "human",
+        "created_at": "2026-01-15T10:00:00.000Z",
+        "content": [
+          {
+            "type": "text",
+            "text": "How do I reverse a list in Python?"
+          }
+        ],
+        "text": "How do I reverse a list in Python?"
+      },
+      {
+        "uuid": "msg-0002",
+        "sender": "assistant",
+        "created_at": "2026-01-15T10:00:30.000Z",
+        "content": [
+          {
+            "type": "text",
+            "text": "Use slicing: `my_list[::-1]`. Or `my_list.reverse()` for in-place."
+          }
+        ],
+        "text": "Use slicing: `my_list[::-1]`. Or `my_list.reverse()` for in-place."
+      }
+    ]
+  },
+  {
+    "uuid": "conv-0002",
+    "name": "API design question",
+    "created_at": "2026-01-16T09:00:00.000Z",
+    "updated_at": "2026-01-16T09:05:00.000Z",
+    "chat_messages": [
+      {
+        "uuid": "msg-0003",
+        "sender": "human",
+        "created_at": "2026-01-16T09:00:00.000Z",
+        "content": [
+          {
+            "type": "text",
+            "text": "Should the API return 200 or 404 when a resource is missing?"
+          }
+        ],
+        "text": "Should the API return 200 or 404 when a resource is missing?"
+      },
+      {
+        "uuid": "msg-0004",
+        "sender": "assistant",
+        "created_at": "2026-01-16T09:00:30.000Z",
+        "content": [
+          {
+            "type": "text",
+            "text": "404. 200 with an empty body conflates 'no data' with 'request succeeded with empty result'."
+          }
+        ],
+        "text": "404. 200 with an empty body conflates 'no data' with 'request succeeded with empty result'."
+      }
+    ]
+  }
+]

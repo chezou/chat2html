@@ -1,6 +1,7 @@
-"""Convert Claude conversation logs to static HTML.
+"""Convert AI conversation logs to static HTML.
 
-Supports claude.ai export, Claude Code JSONL, and claude-chat-exporter Markdown.
+Supports claude.ai export, Claude Code JSONL, claude-chat-exporter Markdown,
+and OpenAI Codex CLI JSONL.
 See README.md for usage.
 """
 
@@ -10,8 +11,9 @@ import json
 import os
 import re
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 import bleach
 import markdown
@@ -461,12 +463,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "html_lang": "ja",
         "font_url": "https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap",
         "body_font": "'Noto Sans JP', -apple-system, sans-serif",
-        "footer_text": "Exported from claude.ai / Claude Code",
+        "footer_text": "Exported from claude.ai / Claude Code / Codex",
         "role_you": "You",
         "role_claude": "Claude",
+        "role_codex": "Codex",
         "messages_label": "messages",
         "default_title_md": "Conversation with Claude",
         "default_title_cc": "Claude Code Session",
+        "default_title_codex": "Codex Session",
         "default_conv_title": "Untitled",
         "cli_loaded": "読み込み: {n} 件の会話 ({path})",
         "cli_header_row": "{h:>4}  {m:>8}  {c:>16}  Title",
@@ -488,12 +492,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "html_lang": "en",
         "font_url": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap",
         "body_font": "'Inter', -apple-system, sans-serif",
-        "footer_text": "Exported from claude.ai / Claude Code",
+        "footer_text": "Exported from claude.ai / Claude Code / Codex",
         "role_you": "You",
         "role_claude": "Claude",
+        "role_codex": "Codex",
         "messages_label": "messages",
         "default_title_md": "Conversation with Claude",
         "default_title_cc": "Claude Code Session",
+        "default_title_codex": "Codex Session",
         "default_conv_title": "Untitled",
         "cli_loaded": "Loaded {n} conversations ({path})",
         "cli_header_row": "{h:>4}  {m:>8}  {c:>16}  Title",
@@ -529,6 +535,57 @@ def t(key: str, **kwargs) -> str:
     """Look up a translated string, formatting with kwargs if given."""
     s = TRANSLATIONS[_LANG].get(key, key)
     return s.format(**kwargs) if kwargs else s
+
+
+# ─── Intermediate representation (IR) ──────────────────────────────
+#
+# Parsers extract conversation content into Message objects whose `blocks`
+# describe the content as a sequence of typed blocks. The renderer then
+# turns Block instances into HTML. This decouples format-specific parsing
+# from format-agnostic rendering / safety-mode handling.
+
+
+@dataclass
+class TextBlock:
+    """Plain Markdown text from a user or assistant turn."""
+
+    text: str
+
+
+@dataclass
+class ThinkingBlock:
+    """Assistant reasoning, rendered collapsed."""
+
+    text: str
+
+
+@dataclass
+class ToolUseBlock:
+    """A tool invocation paired with its result, if any.
+
+    `input` is the raw input dict (any shape).
+    `result` is the raw result text or None when no paired output is available.
+    Safe-mode redaction is applied at render time.
+    """
+
+    name: str
+    input: dict
+    result: str | None = None
+
+
+Block = TextBlock | ThinkingBlock | ToolUseBlock
+
+
+@dataclass
+class Message:
+    """One bubble in the conversation."""
+
+    role: Literal["human", "assistant"]
+    blocks: list[Block] = field(default_factory=list)
+    timestamp: str = ""
+    # Override the displayed role label (e.g. "Codex"). When None,
+    # render_message() falls back to the i18n default for the role.
+    role_label: str | None = None
 
 
 # ─── Common utilities ──────────────────────────────────────────
@@ -782,6 +839,19 @@ def _format_timestamp(ts_str: str) -> str:
         return ts_str
 
 
+def _title_from_text(text: str, max_len: int = 60) -> str:
+    """Build a one-line title from arbitrary text.
+
+    Strips OAuth URLs first so they cannot leak into the page title,
+    header, or any filename derived from it. Falls back to the empty
+    string when the input is empty.
+    """
+    s = _mask_oauth_urls(text or "").strip().split("\n")[0]
+    if len(s) > max_len:
+        s = s[:max_len] + "…"
+    return s
+
+
 def _sanitize_filename(name: str) -> str:
     if not name:
         return "untitled"
@@ -796,6 +866,10 @@ def _sanitize_filename(name: str) -> str:
 FORMAT_CC_JSONL = "cc_jsonl"  # Claude Code session
 FORMAT_CLAUDEAI = "claudeai"  # claude.ai export (multiple conversations)
 FORMAT_MD = "md"  # claude-chat-exporter Markdown
+FORMAT_CODEX_JSONL = "codex_jsonl"  # OpenAI Codex CLI session
+
+# Top-level `type` values that identify a Codex JSONL record.
+_CODEX_TOP_TYPES = ("session_meta", "event_msg", "response_item", "turn_context")
 
 
 def detect_format(path: str, text: str) -> str:
@@ -830,6 +904,14 @@ def detect_format(path: str, text: str) -> str:
             if isinstance(obj, dict):
                 if "chat_messages" in obj:
                     return FORMAT_CLAUDEAI
+                # Codex marker: top-level {timestamp, type, payload} with a known type.
+                if (
+                    obj.get("type") in _CODEX_TOP_TYPES
+                    and isinstance(obj.get("payload"), dict)
+                    and "uuid" not in obj
+                    and "sessionId" not in obj
+                ):
+                    return FORMAT_CODEX_JSONL
                 # Claude Code markers: type, uuid, sessionId
                 if "sessionId" in obj or ("type" in obj and "uuid" in obj):
                     return FORMAT_CC_JSONL
@@ -844,6 +926,13 @@ def detect_format(path: str, text: str) -> str:
                         continue
                     if "chat_messages" in o:
                         return FORMAT_CLAUDEAI
+                    if (
+                        o.get("type") in _CODEX_TOP_TYPES
+                        and isinstance(o.get("payload"), dict)
+                        and "uuid" not in o
+                        and "sessionId" not in o
+                    ):
+                        return FORMAT_CODEX_JSONL
                     if "sessionId" in o or ("type" in o and "uuid" in o):
                         return FORMAT_CC_JSONL
         except json.JSONDecodeError:
@@ -864,14 +953,14 @@ MD_HEADER_RE = re.compile(
 )
 
 
-def parse_markdown(md_text: str) -> tuple[str, str, list[dict]]:
+def parse_markdown(md_text: str) -> tuple[str, str, list[Message]]:
     """Return (title, created, messages)."""
     title = t("default_title_md")
     m = re.search(r"^#\s+(.+?)\s*$", md_text, re.MULTILINE)
     if m:
-        title = m.group(1).strip()
+        title = _title_from_text(m.group(1), max_len=200) or title
 
-    messages = []
+    messages: list[Message] = []
     matches = list(MD_HEADER_RE.finditer(md_text))
     created = ""
     for i, match in enumerate(matches):
@@ -890,13 +979,7 @@ def parse_markdown(md_text: str) -> tuple[str, str, list[dict]]:
             created = timestamp
 
         messages.append(
-            {
-                "role": role,
-                "timestamp": timestamp,
-                "body_html": _render_user_md(body)
-                if role == "human"
-                else _render_md(body),
-            }
+            Message(role=role, timestamp=timestamp, blocks=[TextBlock(text=body)])
         )
 
     return title, created, messages
@@ -946,11 +1029,12 @@ def _extract_claudeai_message_text(msg: dict) -> str:
     return ""
 
 
-def parse_claudeai_conversation(conv: dict) -> tuple[str, str, list[dict]]:
+def parse_claudeai_conversation(conv: dict) -> tuple[str, str, list[Message]]:
     """Parse a single conversation from a claude.ai export."""
-    title = conv.get("name") or t("default_conv_title")
+    raw_name = conv.get("name") or ""
+    title = _title_from_text(raw_name, max_len=200) or t("default_conv_title")
     created = _format_timestamp(conv.get("created_at", ""))
-    messages = []
+    messages: list[Message] = []
     for msg in conv.get("chat_messages", []):
         sender = msg.get("sender", "unknown")
         role = "human" if sender == "human" else "assistant"
@@ -959,13 +1043,7 @@ def parse_claudeai_conversation(conv: dict) -> tuple[str, str, list[dict]]:
         if not text.strip():
             continue
         messages.append(
-            {
-                "role": role,
-                "timestamp": ts,
-                "body_html": _render_user_md(text)
-                if role == "human"
-                else _render_md(text),
-            }
+            Message(role=role, timestamp=ts, blocks=[TextBlock(text=text)])
         )
     return title, created, messages
 
@@ -1018,11 +1096,9 @@ def _render_thinking_block(thinking_text: str) -> str:
     )
 
 
-def _render_tool_use_block(tool_use: dict, tool_result: dict | None) -> str:
-    name = tool_use.get("name", "tool")
-    tinput = (
-        tool_use.get("input", {}) if isinstance(tool_use.get("input"), dict) else {}
-    )
+def _render_tool_use_block(block: ToolUseBlock) -> str:
+    name = block.name
+    tinput = block.input if isinstance(block.input, dict) else {}
 
     # Build the preview shown in the summary.
     # Safe mode only looks at description-like fields.
@@ -1039,6 +1115,7 @@ def _render_tool_use_block(tool_use: dict, tool_result: dict | None) -> str:
             "subagent_type",
             "prompt",
             "pattern",
+            "cmd",
         )
     else:
         candidate_keys = SAFE_TOOL_USE_FIELDS
@@ -1062,8 +1139,8 @@ def _render_tool_use_block(tool_use: dict, tool_result: dict | None) -> str:
         body_parts.append(_render_code(input_pretty, "json"))
 
         # Full tool_result.
-        if tool_result is not None:
-            result_str = _stringify_tool_result_content(tool_result.get("content"))
+        if block.result is not None:
+            result_str = _mask_oauth_urls(block.result)
             if result_str:
                 if len(result_str) > LONG_OUTPUT_THRESHOLD:
                     inner_preview = _short_preview(result_str, 80)
@@ -1098,7 +1175,7 @@ def _render_tool_use_block(tool_use: dict, tool_result: dict | None) -> str:
                 f"</div>"
             )
         # Always show only the omission message for tool_result.
-        if tool_result is not None:
+        if block.result is not None:
             body_parts.append(
                 f'<div class="tool-result-inline">'
                 f'<span class="badge" style="background:var(--text-muted);'
@@ -1121,7 +1198,7 @@ def _render_tool_use_block(tool_use: dict, tool_result: dict | None) -> str:
     )
 
 
-def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[dict]]:
+def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[Message]]:
     """Parse a Claude Code session JSONL."""
     records = []
     for line in jsonl_text.splitlines():
@@ -1147,7 +1224,7 @@ def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[dict]]:
                     if tid:
                         tool_results_by_id[tid] = block
 
-    messages: list[dict] = []
+    messages: list[Message] = []
     assistant_accum: dict[str, dict] = {}
 
     first_user_prompt = ""
@@ -1188,11 +1265,11 @@ def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[dict]]:
                 if not first_user_prompt:
                     first_user_prompt = content
                 messages.append(
-                    {
-                        "role": "human",
-                        "timestamp": timestamp,
-                        "body_html": _render_user_md(content),
-                    }
+                    Message(
+                        role="human",
+                        timestamp=timestamp,
+                        blocks=[TextBlock(text=content)],
+                    )
                 )
             elif isinstance(content, list):
                 text_parts = []
@@ -1206,11 +1283,11 @@ def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[dict]]:
                     if not first_user_prompt:
                         first_user_prompt = text
                     messages.append(
-                        {
-                            "role": "human",
-                            "timestamp": timestamp,
-                            "body_html": _render_user_md(text),
-                        }
+                        Message(
+                            role="human",
+                            timestamp=timestamp,
+                            blocks=[TextBlock(text=text)],
+                        )
                     )
 
         elif rtype == "assistant":
@@ -1222,56 +1299,272 @@ def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[dict]]:
             if mid not in assistant_accum:
                 assistant_accum[mid] = {
                     "timestamp": timestamp,
-                    "blocks": [],
+                    "raw_blocks": [],
                     "emitted_index": None,
                 }
             entry = assistant_accum[mid]
-            entry["blocks"].extend(content if isinstance(content, list) else [])
+            entry["raw_blocks"].extend(content if isinstance(content, list) else [])
 
-            parts = []
-            for block in entry["blocks"]:
-                if not isinstance(block, dict):
+            ir_blocks: list[Block] = []
+            for raw in entry["raw_blocks"]:
+                if not isinstance(raw, dict):
                     continue
-                btype = block.get("type")
+                btype = raw.get("type")
                 if btype == "thinking":
-                    thinking_text = block.get("thinking", "")
+                    thinking_text = raw.get("thinking", "")
                     if thinking_text:
-                        parts.append(_render_thinking_block(thinking_text))
+                        ir_blocks.append(ThinkingBlock(text=thinking_text))
                 elif btype == "text":
-                    text = block.get("text", "")
+                    text = raw.get("text", "")
                     if text:
-                        parts.append(_render_md(text))
+                        ir_blocks.append(TextBlock(text=text))
                 elif btype == "tool_use":
-                    tid = block.get("id")
+                    tid = raw.get("id")
                     tresult = tool_results_by_id.get(tid) if tid else None
-                    parts.append(_render_tool_use_block(block, tresult))
+                    result_str = (
+                        _stringify_tool_result_content(tresult.get("content"))
+                        if tresult is not None
+                        else None
+                    )
+                    raw_input = raw.get("input")
+                    tinput = raw_input if isinstance(raw_input, dict) else {}
+                    ir_blocks.append(
+                        ToolUseBlock(
+                            name=raw.get("name", "tool"),
+                            input=tinput,
+                            result=result_str,
+                        )
+                    )
 
-            body_html = "\n".join(parts)
-            if not body_html.strip():
+            if not ir_blocks:
                 continue
 
             if entry["emitted_index"] is None:
                 messages.append(
-                    {
-                        "role": "assistant",
-                        "timestamp": timestamp,
-                        "body_html": body_html,
-                    }
+                    Message(
+                        role="assistant",
+                        timestamp=timestamp,
+                        blocks=ir_blocks,
+                    )
                 )
                 entry["emitted_index"] = len(messages) - 1
             else:
-                messages[entry["emitted_index"]]["body_html"] = body_html
-                messages[entry["emitted_index"]]["timestamp"] = timestamp
+                messages[entry["emitted_index"]].blocks = ir_blocks
+                messages[entry["emitted_index"]].timestamp = timestamp
 
     # Generate the title.
     title = t("default_title_cc")
     if first_user_prompt:
-        preview = first_user_prompt.strip().split("\n")[0]
-        if len(preview) > 60:
-            preview = preview[:60] + "…"
-        title = preview
+        title = _title_from_text(first_user_prompt) or title
     elif session_id:
         title = f"Session {session_id[:8]}"
+
+    created = _format_timestamp(first_timestamp)
+    return title, created, messages
+
+
+# ─── Codex JSONL parser ───────────────────────────────────────
+
+
+def _extract_codex_outputs(records: list[dict]) -> dict[str, str]:
+    """Build a {call_id: output_text} map from function/custom tool outputs.
+
+    `custom_tool_call_output.output` is a JSON string like {"output": "..."}.
+    """
+    outputs: dict[str, str] = {}
+    for rec in records:
+        if rec.get("type") != "response_item":
+            continue
+        payload = rec.get("payload") or {}
+        ptype = payload.get("type")
+        call_id = payload.get("call_id")
+        if not call_id:
+            continue
+        if ptype == "function_call_output":
+            outputs[call_id] = payload.get("output", "") or ""
+        elif ptype == "custom_tool_call_output":
+            raw = payload.get("output", "") or ""
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict) and "output" in parsed:
+                    outputs[call_id] = str(parsed["output"])
+                    continue
+            except (json.JSONDecodeError, TypeError):
+                pass
+            outputs[call_id] = raw
+    return outputs
+
+
+def _codex_message_text(content: Any) -> str:
+    """Concatenate text from a Codex message.content (input_text/output_text blocks)."""
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") in ("input_text", "output_text"):
+            parts.append(block.get("text", ""))
+    return "\n\n".join(p for p in parts if p)
+
+
+def _codex_reasoning_text(payload: dict) -> str:
+    """Extract human-readable text from a Codex reasoning record's `summary`.
+
+    `summary` is often `[]` (encrypted reasoning only); in that case we have
+    nothing to show.
+    """
+    summary = payload.get("summary") or []
+    parts = []
+    for s in summary:
+        if isinstance(s, dict):
+            parts.append(s.get("text", ""))
+        elif isinstance(s, str):
+            parts.append(s)
+    return "\n\n".join(p for p in parts if p)
+
+
+def parse_codex_jsonl(jsonl_text: str) -> tuple[str, str, list[Message]]:
+    """Parse an OpenAI Codex CLI session JSONL.
+
+    Format: each line is `{timestamp, type, payload}`. Conversation content
+    lives in `response_item` records; `event_msg` and `turn_context` are
+    auxiliary and mostly skipped.
+    """
+    records = []
+    for line in jsonl_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    outputs_by_call_id = _extract_codex_outputs(records)
+
+    messages: list[Message] = []
+    first_user_prompt = ""
+    first_timestamp = ""
+    session_id = ""
+
+    # Codex emits assistant text, reasoning, and tool calls as separate
+    # response_items. We coalesce them into one assistant bubble until a user
+    # message arrives.
+    pending_blocks: list[Block] = []
+    pending_ts = ""
+    codex_role_label = t("role_codex")
+
+    def flush_assistant() -> None:
+        nonlocal pending_blocks, pending_ts
+        if pending_blocks:
+            messages.append(
+                Message(
+                    role="assistant",
+                    timestamp=pending_ts,
+                    blocks=list(pending_blocks),
+                    role_label=codex_role_label,
+                )
+            )
+        pending_blocks = []
+        pending_ts = ""
+
+    for rec in records:
+        rtype = rec.get("type")
+        timestamp = rec.get("timestamp", "")
+        if not first_timestamp:
+            first_timestamp = timestamp
+
+        if rtype == "session_meta":
+            session_id = session_id or (rec.get("payload") or {}).get("id", "")
+            continue
+
+        # Skip event_msg / turn_context / unknown.
+        if rtype != "response_item":
+            continue
+
+        payload = rec.get("payload") or {}
+        ptype = payload.get("type")
+
+        if ptype == "message":
+            role = payload.get("role")
+            text = _codex_message_text(payload.get("content"))
+            if not text:
+                continue
+            # System prompt + auto-approved-prefix notices live under "developer".
+            if role == "developer":
+                continue
+            if role == "user":
+                # Skip the harness <environment_context> injection. Match only
+                # when the entire message *is* the env-context block, so that
+                # a user quoting the tag with their own surrounding text
+                # (e.g. asking about it) still goes through.
+                stripped = text.strip()
+                if (
+                    stripped.startswith("<environment_context>")
+                    and stripped.endswith("</environment_context>")
+                ):
+                    continue
+                flush_assistant()
+                if not first_user_prompt:
+                    first_user_prompt = text
+                messages.append(
+                    Message(
+                        role="human",
+                        timestamp=timestamp,
+                        blocks=[TextBlock(text=text)],
+                    )
+                )
+            elif role == "assistant":
+                if not pending_ts:
+                    pending_ts = timestamp
+                pending_blocks.append(TextBlock(text=text))
+
+        elif ptype == "reasoning":
+            summary_text = _codex_reasoning_text(payload)
+            if summary_text.strip():
+                if not pending_ts:
+                    pending_ts = timestamp
+                pending_blocks.append(ThinkingBlock(text=summary_text))
+
+        elif ptype in ("function_call", "custom_tool_call"):
+            name = payload.get("name", "tool")
+            call_id = payload.get("call_id", "")
+            if ptype == "function_call":
+                args_raw = payload.get("arguments", "")
+                try:
+                    args = (
+                        json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                    )
+                    if not isinstance(args, dict):
+                        args = {"input": args}
+                except json.JSONDecodeError:
+                    args = {"input": args_raw}
+            else:
+                # custom_tool_call.input is a free-form string (e.g. patch text).
+                input_value = payload.get("input", "")
+                args = (
+                    {"input": input_value}
+                    if not isinstance(input_value, dict)
+                    else input_value
+                )
+            output_text = outputs_by_call_id.get(call_id, "") or None
+            if not pending_ts:
+                pending_ts = timestamp
+            pending_blocks.append(
+                ToolUseBlock(name=name, input=args, result=output_text)
+            )
+
+        # function_call_output / custom_tool_call_output were already paired
+        # via outputs_by_call_id.
+
+    flush_assistant()
+
+    title = t("default_title_codex")
+    if first_user_prompt:
+        title = _title_from_text(first_user_prompt) or title
+    elif session_id:
+        title = f"Codex Session {session_id[:8]}"
 
     created = _format_timestamp(first_timestamp)
     return title, created, messages
@@ -1280,21 +1573,40 @@ def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[dict]]:
 # ─── Rendering ────────────────────────────────────────────────
 
 
-def render_message(msg: dict) -> str:
-    role_class = msg["role"]
-    role_label = t("role_you") if role_class == "human" else t("role_claude")
-    timestamp = html_mod.escape(msg.get("timestamp", ""))
-    body_html = msg["body_html"]
+def render_block(block: Block, role: str = "assistant") -> str:
+    """Render a single Block to HTML.
+
+    The role is needed because user TextBlocks get paste-detection
+    rendering, while assistant TextBlocks render straight Markdown.
+    """
+    if isinstance(block, TextBlock):
+        if role == "human":
+            return _render_user_md(block.text)
+        return _render_md(block.text)
+    if isinstance(block, ThinkingBlock):
+        return _render_thinking_block(block.text)
+    if isinstance(block, ToolUseBlock):
+        return _render_tool_use_block(block)
+    return ""
+
+
+def render_message(msg: Message) -> str:
+    if msg.role == "human":
+        role_label = t("role_you")
+    else:
+        role_label = msg.role_label or t("role_claude")
+    timestamp = html_mod.escape(msg.timestamp or "")
+    body_html = "\n".join(render_block(b, msg.role) for b in msg.blocks)
     ts_html = f'<span class="timestamp">{timestamp}</span>' if timestamp else ""
     return (
-        f'<div class="message {role_class}">\n'
+        f'<div class="message {msg.role}">\n'
         f'  <div class="message-role">{role_label}{ts_html}</div>\n'
         f'  <div class="message-body">{body_html}</div>\n'
         f"</div>"
     )
 
 
-def to_html(title: str, created: str, messages: list[dict]) -> str:
+def to_html(title: str, created: str, messages: list[Message]) -> str:
     messages_html = "\n".join(render_message(m) for m in messages)
     meta_parts = []
     if created:
@@ -1345,6 +1657,8 @@ def convert_single_file(input_path: str, output_path: str) -> None:
         title, created, messages = parse_markdown(text)
     elif fmt == FORMAT_CC_JSONL:
         title, created, messages = parse_cc_jsonl(text)
+    elif fmt == FORMAT_CODEX_JSONL:
+        title, created, messages = parse_codex_jsonl(text)
     elif fmt == FORMAT_CLAUDEAI:
         # claude.ai export contains multiple conversations, so hitting this
         # branch means the caller should have used handle_claudeai_export.
