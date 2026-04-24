@@ -1058,13 +1058,40 @@ USER_PASTE_LINES = 50
 USER_PASTE_CHARS = 2000
 # Claude Code wraps slash-command invocations in user messages with these
 # tags. The wrapper can lead with any of <command-message>, <command-name>,
-# or <command-args> depending on how the command was invoked, so we filter
-# on the family rather than a single tag.
+# or <command-args> depending on how the command was invoked.
 SLASH_COMMAND_RE = re.compile(r"^\s*<command-(?:name|message|args)>", re.DOTALL)
-# Local-command output wrappers that should likewise be skipped.
+# Wrappers around local-command output (stdout/stderr/caveat).
 LOCAL_COMMAND_RE = re.compile(
     r"^\s*<local-command-(?:caveat|stdout|stderr)>", re.DOTALL
 )
+
+_CC_COMMAND_NAME_RE = re.compile(
+    r"<command-name>\s*(.*?)\s*</command-name>", re.DOTALL
+)
+_CC_COMMAND_ARGS_RE = re.compile(
+    r"<command-args>\s*(.*?)\s*</command-args>", re.DOTALL
+)
+
+
+def _parse_cc_slash_command(text: str) -> str | None:
+    """Extract a clean "/cmd args" string from a Claude Code slash-command
+    wrapper.
+
+    Returns None if the text is not a wrapper, or if it's a wrapper but no
+    <command-name> tag is present (the latter happens for pure
+    <local-command-stdout>/-stderr noise that we still want to drop).
+    """
+    if not (SLASH_COMMAND_RE.match(text) or LOCAL_COMMAND_RE.match(text)):
+        return None
+    name_match = _CC_COMMAND_NAME_RE.search(text)
+    if not name_match:
+        return None
+    name = name_match.group(1).strip()
+    if not name:
+        return None
+    args_match = _CC_COMMAND_ARGS_RE.search(text)
+    args = args_match.group(1).strip() if args_match else ""
+    return f"{name} {args}".strip()
 
 
 def _stringify_tool_result_content(content: Any) -> str:
@@ -1268,7 +1295,12 @@ def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[Message]]:
 
             if isinstance(content, str):
                 if SLASH_COMMAND_RE.match(content) or LOCAL_COMMAND_RE.match(content):
-                    continue
+                    cleaned = _parse_cc_slash_command(content)
+                    if cleaned is None:
+                        # Wrapper with no extractable <command-name> — pure
+                        # output noise (e.g. bare <local-command-stdout>).
+                        continue
+                    content = cleaned
                 if not first_user_prompt:
                     first_user_prompt = content
                 messages.append(

@@ -93,13 +93,15 @@ def test_cc_jsonl_assistant_renders_tool_call(cc_text):
     assert "Bash" in assistant_html
 
 
-def test_cc_jsonl_filters_slash_command_wrappers():
-    """User messages that are Claude Code slash-command wrappers must be
-    skipped — including ones that start with <command-message> rather than
-    <command-name>, and ones starting with <local-command-stdout>.
+def test_cc_jsonl_cleans_slash_command_wrappers():
+    """Slash-command wrappers are extracted into a clean "/cmd args" string
+    so the actual invocation stays visible in the conversation, instead of
+    being dropped silently. Pure <local-command-stdout> noise (no
+    <command-name> inside) is still filtered out.
     """
     text = "\n".join(
         [
+            # Wrapper led by <command-message>, with non-empty args.
             json.dumps(
                 {
                     "type": "user",
@@ -111,17 +113,36 @@ def test_cc_jsonl_filters_slash_command_wrappers():
                         "content": (
                             "<command-message>codex:setup</command-message>\n"
                             "<command-name>/codex:setup</command-name>\n"
-                            "<command-args></command-args>"
+                            "<command-args>--enable-review-gate</command-args>"
                         ),
                     },
                 }
             ),
+            # Wrapper led by <local-command-caveat> wrapping a <command-name>.
             json.dumps(
                 {
                     "type": "user",
                     "uuid": "u-2",
                     "sessionId": "s-1",
                     "timestamp": "2026-01-15T10:00:01.000Z",
+                    "message": {
+                        "role": "user",
+                        "content": (
+                            "<local-command-caveat>...</local-command-caveat>\n"
+                            "<command-name>/plugin</command-name>\n"
+                            "<command-args>install codex</command-args>\n"
+                            "<local-command-stdout>ok</local-command-stdout>"
+                        ),
+                    },
+                }
+            ),
+            # Pure stdout noise with no <command-name> — must still be dropped.
+            json.dumps(
+                {
+                    "type": "user",
+                    "uuid": "u-3",
+                    "sessionId": "s-1",
+                    "timestamp": "2026-01-15T10:00:02.000Z",
                     "message": {
                         "role": "user",
                         "content": (
@@ -132,12 +153,13 @@ def test_cc_jsonl_filters_slash_command_wrappers():
                     },
                 }
             ),
+            # A genuine user prompt.
             json.dumps(
                 {
                     "type": "user",
-                    "uuid": "u-3",
+                    "uuid": "u-4",
                     "sessionId": "s-1",
-                    "timestamp": "2026-01-15T10:00:02.000Z",
+                    "timestamp": "2026-01-15T10:00:03.000Z",
                     "message": {
                         "role": "user",
                         "content": "Hello, can you help me?",
@@ -149,7 +171,7 @@ def test_cc_jsonl_filters_slash_command_wrappers():
                     "type": "assistant",
                     "uuid": "a-1",
                     "sessionId": "s-1",
-                    "timestamp": "2026-01-15T10:00:03.000Z",
+                    "timestamp": "2026-01-15T10:00:04.000Z",
                     "message": {
                         "id": "msg-1",
                         "role": "assistant",
@@ -160,12 +182,39 @@ def test_cc_jsonl_filters_slash_command_wrappers():
         ]
     )
     title, _, messages = parse_cc_jsonl(text)
-    # Only the genuine user message + assistant reply should remain.
-    assert [m.role for m in messages] == ["human", "assistant"]
-    assert messages[0].blocks[0].text == "Hello, can you help me?"
-    # Title comes from the genuine prompt, not from the wrapper tags.
-    assert title == "Hello, can you help me?"
+    # The two cleanable wrappers + the genuine prompt + the assistant reply.
+    # The pure stdout-only message gets dropped.
+    assert [m.role for m in messages] == ["human", "human", "human", "assistant"]
+    assert messages[0].blocks[0].text == "/codex:setup --enable-review-gate"
+    assert messages[1].blocks[0].text == "/plugin install codex"
+    assert messages[2].blocks[0].text == "Hello, can you help me?"
+    # Title comes from the first user message — the cleaned slash command.
+    assert title == "/codex:setup --enable-review-gate"
+    # No raw XML wrapper tag should leak into the title.
     assert "<command-" not in title
+
+
+def test_cc_jsonl_slash_command_with_empty_args_omits_trailing_space():
+    """A wrapper with empty <command-args> renders as just "/cmd"."""
+    text = json.dumps(
+        {
+            "type": "user",
+            "uuid": "u-1",
+            "sessionId": "s-1",
+            "timestamp": "2026-01-15T10:00:00.000Z",
+            "message": {
+                "role": "user",
+                "content": (
+                    "<command-message>codex:setup</command-message>\n"
+                    "<command-name>/codex:setup</command-name>\n"
+                    "<command-args></command-args>"
+                ),
+            },
+        }
+    )
+    _, _, messages = parse_cc_jsonl(text)
+    assert len(messages) == 1
+    assert messages[0].blocks[0].text == "/codex:setup"
 
 
 # ─── Codex JSONL ───────────────────────────────────────────
