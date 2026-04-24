@@ -281,6 +281,185 @@ def test_codex_renders_non_empty_reasoning_summary(codex_text):
     assert "thinking" in assistant_html
 
 
+def test_codex_filters_bundled_agents_md_and_env_context():
+    """When Codex is launched with an AGENTS.md in the CWD, it bundles two
+    input_text blocks into the first user message: an "# AGENTS.md
+    instructions for ..." preamble and an <environment_context> block.
+    Both are harness preamble and must be filtered at the block level —
+    otherwise the AGENTS.md text leaks into the conversation and drives
+    the page title.
+    """
+    text = "\n".join(
+        [
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:00.000Z",
+                    "type": "session_meta",
+                    "payload": {"id": "x", "cwd": "/Users/dev/projects/example"},
+                }
+            ),
+            # First user message bundles AGENTS.md + env_context.
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:01.000Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": (
+                                    "# AGENTS.md instructions for "
+                                    "/Users/dev/projects/example\n\n"
+                                    "<INSTRUCTIONS>\n@CLAUDE.md\n</INSTRUCTIONS>"
+                                ),
+                            },
+                            {
+                                "type": "input_text",
+                                "text": (
+                                    "<environment_context>\n"
+                                    "  <cwd>/Users/dev/projects/example</cwd>\n"
+                                    "</environment_context>"
+                                ),
+                            },
+                        ],
+                    },
+                }
+            ),
+            # The genuine first user prompt.
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:02.000Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": "Why does this codebase use Alembic?",
+                            }
+                        ],
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:03.000Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "Let me check.",
+                            }
+                        ],
+                    },
+                }
+            ),
+        ]
+    )
+    title, _, messages = parse_codex_jsonl(text)
+    # The bundled-preamble user message is dropped entirely.
+    assert [m.role for m in messages] == ["human", "assistant"]
+    assert messages[0].blocks[0].text == "Why does this codebase use Alembic?"
+    # Title comes from the genuine prompt, not from the AGENTS.md preamble.
+    assert title == "Why does this codebase use Alembic?"
+    bodies = "\n".join(render_message(m) for m in messages)
+    assert "AGENTS.md instructions" not in bodies
+    assert "<environment_context>" not in bodies
+
+
+def test_codex_user_message_quoting_agents_md_in_one_block_is_kept():
+    """A single user input_text block that *mentions* the AGENTS.md prefix
+    with surrounding text must NOT be filtered — the per-block check
+    requires the block to start with the prefix, but a block whose body
+    is genuine prose discussing AGENTS.md still survives because it
+    doesn't start with the literal "# AGENTS.md instructions for " token
+    immediately. This is the symmetric case to the env_context regression."""
+    text = "\n".join(
+        [
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:00.000Z",
+                    "type": "session_meta",
+                    "payload": {"id": "x", "cwd": "/tmp"},
+                }
+            ),
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:01.000Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": (
+                                    "Have you seen the line "
+                                    "`# AGENTS.md instructions for /tmp` in "
+                                    "Codex output? What is that?"
+                                ),
+                            }
+                        ],
+                    },
+                }
+            ),
+        ]
+    )
+    _, _, messages = parse_codex_jsonl(text)
+    assert len(messages) == 1
+    assert "Have you seen the line" in messages[0].blocks[0].text
+
+
+def test_codex_user_message_with_leading_whitespace_before_agents_md_prefix_is_kept():
+    """A user block whose body has leading whitespace before the literal
+    AGENTS.md preamble token must NOT be filtered. Codex itself always
+    emits the preamble at byte 0, so anything indented is not a harness
+    injection — it's user prose (e.g. an indented code block quoting
+    the preamble).
+    """
+    text = "\n".join(
+        [
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:00.000Z",
+                    "type": "session_meta",
+                    "payload": {"id": "x", "cwd": "/tmp"},
+                }
+            ),
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:01.000Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": (
+                                    "Look at this snippet:\n\n"
+                                    "    # AGENTS.md instructions for /tmp\n"
+                                    "    <INSTRUCTIONS>...</INSTRUCTIONS>\n\n"
+                                    "Why does Codex emit it?"
+                                ),
+                            }
+                        ],
+                    },
+                }
+            ),
+        ]
+    )
+    _, _, messages = parse_codex_jsonl(text)
+    assert len(messages) == 1
+    assert "Why does Codex emit it?" in messages[0].blocks[0].text
+
+
 def test_codex_user_message_quoting_env_context_is_kept():
     """A user message that mentions <environment_context> but adds more
     content must NOT be filtered.
