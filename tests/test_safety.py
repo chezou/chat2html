@@ -52,8 +52,8 @@ def test_mask_leaves_plain_url_alone():
 # ─── Safe vs --full tool rendering ─────────────────────────
 
 
-def test_safe_mode_omits_tool_result():
-    cli._FULL = False
+def test_safe_mode_omits_tool_result(monkeypatch):
+    monkeypatch.setattr(cli, "_FULL", False)
     block = ToolUseBlock(
         name="Bash",
         input={"command": "rm -rf /important/path"},
@@ -69,8 +69,8 @@ def test_safe_mode_omits_tool_result():
     assert "omitted" in html
 
 
-def test_safe_mode_keeps_description_field():
-    cli._FULL = False
+def test_safe_mode_keeps_description_field(monkeypatch):
+    monkeypatch.setattr(cli, "_FULL", False)
     block = ToolUseBlock(
         name="Bash",
         input={"command": "rm -rf x", "description": "tidy up"},
@@ -81,16 +81,56 @@ def test_safe_mode_keeps_description_field():
     assert "rm -rf x" not in html
 
 
-def test_full_mode_shows_tool_input_and_result():
-    cli._FULL = True
-    try:
-        block = ToolUseBlock(
-            name="Bash",
-            input={"command": "ls"},
-            result="file_a.py",
-        )
-        html = _render_tool_use_block(block)
-        assert "ls" in html
-        assert "file_a.py" in html
-    finally:
-        cli._FULL = False
+def test_title_masks_oauth_url():
+    """The conversation title is built from the first user prompt; an OAuth
+    URL there must not leak into <title>, <h1>, or any derived filename."""
+    import json
+
+    from chat2html.cli import parse_codex_jsonl
+
+    text = "\n".join(
+        [
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:00.000Z",
+                    "type": "session_meta",
+                    "payload": {"id": "x", "cwd": "/tmp"},
+                }
+            ),
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:01.000Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": (
+                                    "Check https://accounts.google.com/o/oauth2/auth"
+                                    "?state=secret&code=leak — does this URL parse?"
+                                ),
+                            }
+                        ],
+                    },
+                }
+            ),
+        ]
+    )
+    title, _, _ = parse_codex_jsonl(text)
+    assert "accounts.google.com" not in title
+    assert "secret" not in title
+    assert "[redacted OAuth URL]" in title
+
+
+def test_full_mode_shows_tool_input_and_result(monkeypatch):
+    monkeypatch.setattr(cli, "_FULL", True)
+    block = ToolUseBlock(
+        name="Bash",
+        input={"command": "ls"},
+        result="file_a.py",
+    )
+    html = _render_tool_use_block(block)
+    assert "ls" in html
+    assert "file_a.py" in html

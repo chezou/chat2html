@@ -463,7 +463,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "html_lang": "ja",
         "font_url": "https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap",
         "body_font": "'Noto Sans JP', -apple-system, sans-serif",
-        "footer_text": "Exported from claude.ai / Claude Code",
+        "footer_text": "Exported from claude.ai / Claude Code / Codex",
         "role_you": "You",
         "role_claude": "Claude",
         "role_codex": "Codex",
@@ -492,7 +492,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "html_lang": "en",
         "font_url": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap",
         "body_font": "'Inter', -apple-system, sans-serif",
-        "footer_text": "Exported from claude.ai / Claude Code",
+        "footer_text": "Exported from claude.ai / Claude Code / Codex",
         "role_you": "You",
         "role_claude": "Claude",
         "role_codex": "Codex",
@@ -839,6 +839,19 @@ def _format_timestamp(ts_str: str) -> str:
         return ts_str
 
 
+def _title_from_text(text: str, max_len: int = 60) -> str:
+    """Build a one-line title from arbitrary text.
+
+    Strips OAuth URLs first so they cannot leak into the page title,
+    header, or any filename derived from it. Falls back to the empty
+    string when the input is empty.
+    """
+    s = _mask_oauth_urls(text or "").strip().split("\n")[0]
+    if len(s) > max_len:
+        s = s[:max_len] + "…"
+    return s
+
+
 def _sanitize_filename(name: str) -> str:
     if not name:
         return "untitled"
@@ -945,7 +958,7 @@ def parse_markdown(md_text: str) -> tuple[str, str, list[Message]]:
     title = t("default_title_md")
     m = re.search(r"^#\s+(.+?)\s*$", md_text, re.MULTILINE)
     if m:
-        title = m.group(1).strip()
+        title = _title_from_text(m.group(1), max_len=200) or title
 
     messages: list[Message] = []
     matches = list(MD_HEADER_RE.finditer(md_text))
@@ -1018,7 +1031,8 @@ def _extract_claudeai_message_text(msg: dict) -> str:
 
 def parse_claudeai_conversation(conv: dict) -> tuple[str, str, list[Message]]:
     """Parse a single conversation from a claude.ai export."""
-    title = conv.get("name") or t("default_conv_title")
+    raw_name = conv.get("name") or ""
+    title = _title_from_text(raw_name, max_len=200) or t("default_conv_title")
     created = _format_timestamp(conv.get("created_at", ""))
     messages: list[Message] = []
     for msg in conv.get("chat_messages", []):
@@ -1341,10 +1355,7 @@ def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[dict]]:
     # Generate the title.
     title = t("default_title_cc")
     if first_user_prompt:
-        preview = first_user_prompt.strip().split("\n")[0]
-        if len(preview) > 60:
-            preview = preview[:60] + "…"
-        title = preview
+        title = _title_from_text(first_user_prompt) or title
     elif session_id:
         title = f"Session {session_id[:8]}"
 
@@ -1551,10 +1562,7 @@ def parse_codex_jsonl(jsonl_text: str) -> tuple[str, str, list[dict]]:
 
     title = t("default_title_codex")
     if first_user_prompt:
-        preview = first_user_prompt.strip().split("\n")[0]
-        if len(preview) > 60:
-            preview = preview[:60] + "…"
-        title = preview
+        title = _title_from_text(first_user_prompt) or title
     elif session_id:
         title = f"Codex Session {session_id[:8]}"
 
