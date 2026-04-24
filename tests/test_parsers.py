@@ -93,6 +93,81 @@ def test_cc_jsonl_assistant_renders_tool_call(cc_text):
     assert "Bash" in assistant_html
 
 
+def test_cc_jsonl_filters_slash_command_wrappers():
+    """User messages that are Claude Code slash-command wrappers must be
+    skipped — including ones that start with <command-message> rather than
+    <command-name>, and ones starting with <local-command-stdout>.
+    """
+    text = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "user",
+                    "uuid": "u-1",
+                    "sessionId": "s-1",
+                    "timestamp": "2026-01-15T10:00:00.000Z",
+                    "message": {
+                        "role": "user",
+                        "content": (
+                            "<command-message>codex:setup</command-message>\n"
+                            "<command-name>/codex:setup</command-name>\n"
+                            "<command-args></command-args>"
+                        ),
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "user",
+                    "uuid": "u-2",
+                    "sessionId": "s-1",
+                    "timestamp": "2026-01-15T10:00:01.000Z",
+                    "message": {
+                        "role": "user",
+                        "content": (
+                            "<local-command-stdout>"
+                            "installed plugin"
+                            "</local-command-stdout>"
+                        ),
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "user",
+                    "uuid": "u-3",
+                    "sessionId": "s-1",
+                    "timestamp": "2026-01-15T10:00:02.000Z",
+                    "message": {
+                        "role": "user",
+                        "content": "Hello, can you help me?",
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "uuid": "a-1",
+                    "sessionId": "s-1",
+                    "timestamp": "2026-01-15T10:00:03.000Z",
+                    "message": {
+                        "id": "msg-1",
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Sure."}],
+                    },
+                }
+            ),
+        ]
+    )
+    title, _, messages = parse_cc_jsonl(text)
+    # Only the genuine user message + assistant reply should remain.
+    assert [m.role for m in messages] == ["human", "assistant"]
+    assert messages[0].blocks[0].text == "Hello, can you help me?"
+    # Title comes from the genuine prompt, not from the wrapper tags.
+    assert title == "Hello, can you help me?"
+    assert "<command-" not in title
+
+
 # ─── Codex JSONL ───────────────────────────────────────────
 
 

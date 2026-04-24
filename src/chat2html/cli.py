@@ -1056,8 +1056,15 @@ LONG_OUTPUT_THRESHOLD = 500
 # Collapse when either the line count or the character count exceeds the limit.
 USER_PASTE_LINES = 50
 USER_PASTE_CHARS = 2000
-SLASH_COMMAND_RE = re.compile(r"^\s*<command-name>", re.DOTALL)
-LOCAL_CAVEAT_RE = re.compile(r"^\s*<local-command-caveat>", re.DOTALL)
+# Claude Code wraps slash-command invocations in user messages with these
+# tags. The wrapper can lead with any of <command-message>, <command-name>,
+# or <command-args> depending on how the command was invoked, so we filter
+# on the family rather than a single tag.
+SLASH_COMMAND_RE = re.compile(r"^\s*<command-(?:name|message|args)>", re.DOTALL)
+# Local-command output wrappers that should likewise be skipped.
+LOCAL_CAVEAT_RE = re.compile(
+    r"^\s*<local-command-(?:caveat|stdout|stderr)>", re.DOTALL
+)
 
 
 def _stringify_tool_result_content(content: Any) -> str:
