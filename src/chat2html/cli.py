@@ -1198,7 +1198,7 @@ def _render_tool_use_block(block: ToolUseBlock) -> str:
     )
 
 
-def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[dict]]:
+def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[Message]]:
     """Parse a Claude Code session JSONL."""
     records = []
     for line in jsonl_text.splitlines():
@@ -1424,7 +1424,7 @@ def _codex_reasoning_text(payload: dict) -> str:
     return "\n\n".join(p for p in parts if p)
 
 
-def parse_codex_jsonl(jsonl_text: str) -> tuple[str, str, list[dict]]:
+def parse_codex_jsonl(jsonl_text: str) -> tuple[str, str, list[Message]]:
     """Parse an OpenAI Codex CLI session JSONL.
 
     Format: each line is `{timestamp, type, payload}`. Conversation content
