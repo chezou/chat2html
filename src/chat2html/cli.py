@@ -1062,7 +1062,7 @@ USER_PASTE_CHARS = 2000
 # on the family rather than a single tag.
 SLASH_COMMAND_RE = re.compile(r"^\s*<command-(?:name|message|args)>", re.DOTALL)
 # Local-command output wrappers that should likewise be skipped.
-LOCAL_CAVEAT_RE = re.compile(
+LOCAL_COMMAND_RE = re.compile(
     r"^\s*<local-command-(?:caveat|stdout|stderr)>", re.DOTALL
 )
 
@@ -1267,7 +1267,7 @@ def parse_cc_jsonl(jsonl_text: str) -> tuple[str, str, list[Message]]:
                     continue
 
             if isinstance(content, str):
-                if SLASH_COMMAND_RE.match(content) or LOCAL_CAVEAT_RE.match(content):
+                if SLASH_COMMAND_RE.match(content) or LOCAL_COMMAND_RE.match(content):
                     continue
                 if not first_user_prompt:
                     first_user_prompt = content
