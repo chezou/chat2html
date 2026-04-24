@@ -1448,13 +1448,22 @@ def _codex_text_block_is_harness_injection(text: str) -> bool:
     extra input_text blocks. We filter them at the block level so a
     bundled message doesn't slip through whole just because one block
     happens to be the genuine prompt.
+
+    Whitespace handling differs between the two wrapper kinds on purpose:
+    - The env_context wrapper is matched after `strip()` because the XML
+      payload may have trailing newlines.
+    - The AGENTS.md preamble is matched against the original `text`
+      (no leading-whitespace tolerance) because Codex always emits the
+      preamble at byte 0 of its injected block; insisting on a strict
+      prefix avoids dropping user prose that happens to begin with
+      whitespace followed by the literal token.
     """
     s = text.strip()
     if not s:
         return True
     if s.startswith("<environment_context>") and s.endswith("</environment_context>"):
         return True
-    if s.startswith(_CODEX_AGENTS_MD_PREFIX):
+    if text.startswith(_CODEX_AGENTS_MD_PREFIX):
         return True
     return False
 

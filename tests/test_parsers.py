@@ -416,6 +416,50 @@ def test_codex_user_message_quoting_agents_md_in_one_block_is_kept():
     assert "Have you seen the line" in messages[0].blocks[0].text
 
 
+def test_codex_user_message_with_leading_whitespace_before_agents_md_prefix_is_kept():
+    """A user block whose body has leading whitespace before the literal
+    AGENTS.md preamble token must NOT be filtered. Codex itself always
+    emits the preamble at byte 0, so anything indented is not a harness
+    injection — it's user prose (e.g. an indented code block quoting
+    the preamble).
+    """
+    text = "\n".join(
+        [
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:00.000Z",
+                    "type": "session_meta",
+                    "payload": {"id": "x", "cwd": "/tmp"},
+                }
+            ),
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:01.000Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": (
+                                    "Look at this snippet:\n\n"
+                                    "    # AGENTS.md instructions for /tmp\n"
+                                    "    <INSTRUCTIONS>...</INSTRUCTIONS>\n\n"
+                                    "Why does Codex emit it?"
+                                ),
+                            }
+                        ],
+                    },
+                }
+            ),
+        ]
+    )
+    _, _, messages = parse_codex_jsonl(text)
+    assert len(messages) == 1
+    assert "Why does Codex emit it?" in messages[0].blocks[0].text
+
+
 def test_codex_user_message_quoting_env_context_is_kept():
     """A user message that mentions <environment_context> but adds more
     content must NOT be filtered.
