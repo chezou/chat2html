@@ -7,17 +7,15 @@ HTML rendering matters, render the message and check the resulting string.
 
 import json
 
-from chat2html.cli import (
-    TextBlock,
-    ThinkingBlock,
-    ToolUseBlock,
+from chat2html.ir import TextBlock, ThinkingBlock, ToolUseBlock
+from chat2html.parsers import (
     load_claudeai_export,
     parse_cc_jsonl,
     parse_claudeai_conversation,
     parse_codex_jsonl,
     parse_markdown,
-    render_message,
 )
+from chat2html.render import render_message
 
 
 def _bodies(messages):

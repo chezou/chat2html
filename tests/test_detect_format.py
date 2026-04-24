@@ -1,4 +1,4 @@
-from chat2html.cli import (
+from chat2html.format_detect import (
     FORMAT_CC_JSONL,
     FORMAT_CLAUDEAI,
     FORMAT_CODEX_JSONL,

@@ -1,12 +1,9 @@
 """Tests for the safety mechanisms: OAuth URL masking and --full toggle."""
 
-from chat2html import cli
-from chat2html.cli import (
-    ToolUseBlock,
-    _is_oauth_url,
-    _mask_oauth_urls,
-    _render_tool_use_block,
-)
+from chat2html import render
+from chat2html.ir import ToolUseBlock
+from chat2html.render import _render_tool_use_block
+from chat2html.safety import _is_oauth_url, _mask_oauth_urls
 
 # ─── OAuth URL detection ───────────────────────────────────
 
@@ -53,7 +50,7 @@ def test_mask_leaves_plain_url_alone():
 
 
 def test_safe_mode_omits_tool_result(monkeypatch):
-    monkeypatch.setattr(cli, "_FULL", False)
+    monkeypatch.setattr(render, "_FULL", False)
     block = ToolUseBlock(
         name="Bash",
         input={"command": "rm -rf /important/path"},
@@ -70,7 +67,7 @@ def test_safe_mode_omits_tool_result(monkeypatch):
 
 
 def test_safe_mode_keeps_description_field(monkeypatch):
-    monkeypatch.setattr(cli, "_FULL", False)
+    monkeypatch.setattr(render, "_FULL", False)
     block = ToolUseBlock(
         name="Bash",
         input={"command": "rm -rf x", "description": "tidy up"},
@@ -86,7 +83,7 @@ def test_title_masks_oauth_url():
     URL there must not leak into <title>, <h1>, or any derived filename."""
     import json
 
-    from chat2html.cli import parse_codex_jsonl
+    from chat2html.parsers import parse_codex_jsonl
 
     text = "\n".join(
         [
@@ -125,7 +122,7 @@ def test_title_masks_oauth_url():
 
 
 def test_full_mode_shows_tool_input_and_result(monkeypatch):
-    monkeypatch.setattr(cli, "_FULL", True)
+    monkeypatch.setattr(render, "_FULL", True)
     block = ToolUseBlock(
         name="Bash",
         input={"command": "ls"},
