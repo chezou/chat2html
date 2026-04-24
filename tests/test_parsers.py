@@ -7,21 +7,82 @@ HTML rendering matters, render the message and check the resulting string.
 
 import json
 
-from chat2html.cli import (
-    TextBlock,
-    ThinkingBlock,
-    ToolUseBlock,
+from chat2html.ir import TextBlock, ThinkingBlock, ToolUseBlock
+from chat2html.parsers import (
     load_claudeai_export,
     parse_cc_jsonl,
     parse_claudeai_conversation,
     parse_codex_jsonl,
     parse_markdown,
-    render_message,
 )
+from chat2html.render import render_message
 
 
 def _bodies(messages):
     return "\n".join(render_message(m) for m in messages)
+
+
+# ─── JSONL robustness (shared shape across parsers) ───────
+
+
+def test_claudeai_jsonl_skips_non_dict_lines():
+    """JSONL lines that parse but aren't dicts (null, [], strings) are
+    dropped instead of being passed through to break .get() calls later."""
+    text = "\n".join(["null", "[]", '"a string"', json.dumps({"name": "real"})])
+    convs = load_claudeai_export(text)
+    assert len(convs) == 1
+    assert convs[0]["name"] == "real"
+
+
+def test_cc_jsonl_skips_non_dict_lines():
+    text = "\n".join(
+        [
+            "null",
+            "[]",
+            json.dumps(
+                {
+                    "type": "user",
+                    "uuid": "u-1",
+                    "sessionId": "s-1",
+                    "timestamp": "2026-01-15T10:00:00.000Z",
+                    "message": {"role": "user", "content": "hi"},
+                }
+            ),
+        ]
+    )
+    _title, _, messages = parse_cc_jsonl(text)
+    assert len(messages) == 1
+    assert messages[0].blocks[0].text == "hi"
+
+
+def test_codex_jsonl_skips_non_dict_lines():
+    text = "\n".join(
+        [
+            "null",
+            "[]",
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:00.000Z",
+                    "type": "session_meta",
+                    "payload": {"id": "x", "cwd": "/tmp"},
+                }
+            ),
+            json.dumps(
+                {
+                    "timestamp": "2026-01-15T10:00:01.000Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "hi"}],
+                    },
+                }
+            ),
+        ]
+    )
+    _title, _, messages = parse_codex_jsonl(text)
+    assert len(messages) == 1
+    assert messages[0].blocks[0].text == "hi"
 
 
 # ─── Markdown ──────────────────────────────────────────────

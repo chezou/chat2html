@@ -1,10 +1,10 @@
 # chat2html
 
-Share-conscious HTML exporter for Claude conversations.
+Share-conscious HTML exporter for AI coding-assistant conversations (Claude and Codex).
 
 ## Why chat2html?
 
-- **Three formats, one tool** — Auto-detects Claude Code JSONL, claude.ai exports, and claude-chat-exporter Markdown.
+- **Four formats, one tool** — Auto-detects Claude Code JSONL, claude.ai exports, claude-chat-exporter Markdown, and OpenAI Codex CLI JSONL.
 - **Safer sharing defaults** — Tool results are omitted and OAuth URLs (with `state`, `code`, `token`, callback paths) are redacted by default. Use `--full` only when you need the full picture for yourself.
 - **Self-contained output** — One HTML file with light/dark themes, syntax highlighting, and collapsible thinking blocks and long pastes.
 - **Zero install** — `uvx --from git+https://github.com/chezou/chat2html chat2html session.jsonl`.
