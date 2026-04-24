@@ -1434,8 +1434,39 @@ def _extract_codex_outputs(records: list[dict]) -> dict[str, str]:
     return outputs
 
 
-def _codex_message_text(content: Any) -> str:
-    """Concatenate text from a Codex message.content (input_text/output_text blocks)."""
+# Prefix Codex prepends to the bundled-in AGENTS.md contents when the CWD
+# has an AGENTS.md file. The full text looks like:
+#   "# AGENTS.md instructions for <abs path>\n\n<INSTRUCTIONS>...</INSTRUCTIONS>"
+_CODEX_AGENTS_MD_PREFIX = "# AGENTS.md instructions for "
+
+
+def _codex_text_block_is_harness_injection(text: str) -> bool:
+    """True for an input_text block that's a Codex harness injection
+    (env_context preamble or AGENTS.md auto-load), not actual user content.
+
+    Codex bundles these into the first user message's content array as
+    extra input_text blocks. We filter them at the block level so a
+    bundled message doesn't slip through whole just because one block
+    happens to be the genuine prompt.
+    """
+    s = text.strip()
+    if not s:
+        return True
+    if s.startswith("<environment_context>") and s.endswith("</environment_context>"):
+        return True
+    if s.startswith(_CODEX_AGENTS_MD_PREFIX):
+        return True
+    return False
+
+
+def _codex_message_text(content: Any, *, drop_harness_blocks: bool = False) -> str:
+    """Concatenate text from a Codex message.content (input_text/output_text blocks).
+
+    When `drop_harness_blocks=True`, individual blocks that look like Codex
+    harness injections (AGENTS.md auto-load, environment_context wrapper)
+    are filtered out before joining. Use this for user messages; assistant
+    output_text never contains harness injections.
+    """
     if not isinstance(content, list):
         return ""
     parts = []
@@ -1443,7 +1474,10 @@ def _codex_message_text(content: Any) -> str:
         if not isinstance(block, dict):
             continue
         if block.get("type") in ("input_text", "output_text"):
-            parts.append(block.get("text", ""))
+            text = block.get("text", "")
+            if drop_harness_blocks and _codex_text_block_is_harness_injection(text):
+                continue
+            parts.append(text)
     return "\n\n".join(p for p in parts if p)
 
 
@@ -1527,23 +1561,23 @@ def parse_codex_jsonl(jsonl_text: str) -> tuple[str, str, list[Message]]:
 
         if ptype == "message":
             role = payload.get("role")
-            text = _codex_message_text(payload.get("content"))
-            if not text:
-                continue
             # System prompt + auto-approved-prefix notices live under "developer".
             if role == "developer":
                 continue
+            # For user messages, drop harness-injected blocks
+            # (env_context, AGENTS.md auto-load) before joining; if nothing
+            # remains, the message was pure harness preamble and can be
+            # skipped. A user message that *quotes* one of those tags with
+            # surrounding text in the same block still survives, because
+            # the per-block check requires the whole block to be the
+            # wrapper.
+            text = _codex_message_text(
+                payload.get("content"),
+                drop_harness_blocks=(role == "user"),
+            )
+            if not text:
+                continue
             if role == "user":
-                # Skip the harness <environment_context> injection. Match only
-                # when the entire message *is* the env-context block, so that
-                # a user quoting the tag with their own surrounding text
-                # (e.g. asking about it) still goes through.
-                stripped = text.strip()
-                if (
-                    stripped.startswith("<environment_context>")
-                    and stripped.endswith("</environment_context>")
-                ):
-                    continue
                 flush_assistant()
                 if not first_user_prompt:
                     first_user_prompt = text
