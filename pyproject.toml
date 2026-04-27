@@ -1,10 +1,10 @@
 [project]
 name = "chat2html"
 version = "0.1.0"
-description = "Add your description here"
+description = "Share-conscious HTML exporter for AI coding-assistant conversations (Claude and Codex)."
 readme = "README.md"
 authors = [
-    { email = "aki.ariga.001@layerx.co.jp" }
+    { name = "Aki Ariga", email = "github@chezo.uno" }
 ]
 requires-python = ">=3.13"
 dependencies = [
@@ -12,6 +12,18 @@ dependencies = [
     "markdown>=3.5",
 ]
 license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["claude", "claude-code", "codex", "chatgpt", "html", "export", "conversation", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Text Processing :: Markup :: HTML",
+]
 
 [project.scripts]
 chat2html = "chat2html.cli:main"
