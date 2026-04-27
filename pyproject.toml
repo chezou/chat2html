@@ -1,6 +1,6 @@
 [project]
 name = "chat2html"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Share-conscious HTML exporter for AI coding-assistant conversations (Claude and Codex)."
 readme = "README.md"
 authors = [
@@ -34,8 +34,17 @@ repository = "https://github.com/chezou/chat2html"
 issues = "https://github.com/chezou/chat2html/issues"
 
 [build-system]
-requires = ["uv_build>=0.11.3,<0.12.0"]
-build-backend = "uv_build"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chat2html"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/chat2html", "README.md", "LICENSE", "pyproject.toml"]
 
 [dependency-groups]
 dev = [
