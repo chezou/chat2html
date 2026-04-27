@@ -6,6 +6,9 @@ dist/
 wheels/
 *.egg-info
 
+# hatch-vcs generated version file
+src/chat2html/_version.py
+
 # Virtual environments
 .venv
 

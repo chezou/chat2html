@@ -9,7 +9,7 @@ import argparse
 import os
 import sys
 
-from . import i18n, render
+from . import __version__, i18n, render
 from .format_detect import (
     FORMAT_CC_JSONL,
     FORMAT_CLAUDEAI,
@@ -152,6 +152,12 @@ Examples:
   chat2html conversations.json -i 0,3,7 -d out/
   chat2html conversations.json --all -d out/
 """,
+    )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument("files", nargs="+", help=".md / .jsonl / .json file(s)")
     parser.add_argument(
