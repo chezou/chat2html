@@ -30,6 +30,7 @@ from .parsers.claude_code import (
     _parse_cc_slash_command,
 )
 from .parsers.codex import _codex_message_text
+from .parsers.markdown import MD_HEADER_RE
 
 # Cap on how much of each file we read for detect + peek. Big enough to
 # cover typical session preambles, small enough to keep walking a large
@@ -51,6 +52,14 @@ DEFAULT_MAX_FILES = 200
 # cached previews (e.g. literal "/clear" snippets, or empty entries from
 # an earlier "skip all slash commands" iteration) get re-derived.
 _CACHE_VERSION = 3
+
+
+class PickerNotInstalled(Exception):
+    """Raised by `run_picker` when the optional `pick` package is missing.
+
+    Distinct from a generic RuntimeError so the CLI can react to "install
+    the extra" without swallowing unrelated picker failures.
+    """
 
 
 @dataclass
@@ -138,7 +147,6 @@ def _peek_codex_jsonl(text: str) -> str:
 
 
 _MD_HUMAN_RE = re.compile(r"^##\s+Human(?:\s*\([^)]*\))?\s*:\s*$", re.MULTILINE)
-_MD_CHAT_HEADER_RE = re.compile(r"^##\s+(Human|Claude)\b", re.MULTILINE)
 
 
 def _peek_md(text: str) -> str:
@@ -202,30 +210,45 @@ def _save_cache(cache: dict) -> None:
 
 
 def walk_chat_files(
-    root: Path, max_depth: int = DEFAULT_MAX_DEPTH
-) -> list[ChatFile]:
+    root: Path,
+    max_depth: int = DEFAULT_MAX_DEPTH,
+    max_files: int = 0,
+) -> tuple[list[ChatFile], int]:
     """Find chat-log files under `root`, sorted by mtime descending.
+
+    Two-phase walk: phase 1 only does cheap `stat()` calls to collect
+    candidates; phase 2 reads file heads (for fmt detection + preview)
+    only on the surviving N. This way `max_files` saves real I/O when
+    the user points at a tree with thousands of stale sessions.
 
     Filters by extension (`.md` / `.markdown` / `.jsonl`), then runs
     `detect_format` on each candidate to drop unrelated files (e.g. a
     project README that happens to be `.md`). claude.ai exports are
     also dropped — they belong to the single-file workflow.
 
-    `max_depth` caps how many directory levels we descend from `root`:
-    `0` = root only (no recursion), `1` = root + immediate subdirs, etc.
-    Default is `DEFAULT_MAX_DEPTH`, picked to cover both Claude Code
-    (`projects/<proj>/<sessionid>.jsonl`) and Codex
-    (`sessions/YYYY/MM/DD/file.jsonl`) layouts without blowing up when
-    the user points at their entire `~/.claude` or `~/.codex` tree.
+    Args:
+        root: directory to walk.
+        max_depth: max recursion depth from `root`. `0` = root only
+            (no recursion). Default `DEFAULT_MAX_DEPTH`, picked to
+            cover both Claude Code and Codex layouts without blowing
+            up when the user points at all of `~/.claude` or `~/.codex`.
+        max_files: cap on the number of (most-recent) files we
+            actually inspect for fmt detection + preview. `0` (default)
+            disables the cap.
+
+    Returns:
+        `(items, dropped)` where `items` are validated ChatFiles
+        (mtime-desc) and `dropped` counts files that matched the
+        extension filter but were trimmed by `max_files` before fmt
+        detection. Items that fail fmt detection are silently excluded
+        and not counted in `dropped`.
     """
-    cache = _load_cache()
-    cache_dirty = False
-    out: list[ChatFile] = []
+    # Phase 1: collect (path, mtime) using only cheap stat() calls.
+    candidates: list[tuple[Path, float]] = []
     for dirpath, dirnames, filenames in os.walk(root):
         rel = os.path.relpath(dirpath, root)
         depth = 0 if rel == "." else len(Path(rel).parts)
         if depth >= max_depth:
-            # Capture files in this dir but stop descending.
             dirnames[:] = []
         else:
             dirnames[:] = [d for d in dirnames if not d.startswith(".")]
@@ -242,51 +265,57 @@ def walk_chat_files(
                 continue
             if stat.st_size == 0:
                 continue
-            key = str(path.resolve())
-            entry = cache.get(key)
-            if entry and entry.get("mtime") == stat.st_mtime:
-                fmt = entry["fmt"]
-                preview = entry.get("preview", "")
-            else:
-                head = _read_head(path)
-                if not head.strip():
-                    continue
-                fmt = detect_format(str(path), head)
-                if fmt == FORMAT_CLAUDEAI:
-                    continue
-                # `detect_format` returns FORMAT_MD for *any* `.md` file
-                # by extension alone, so a stray README.md would otherwise
-                # leak in. Require a chat-style `## Human` / `## Claude`
-                # header before accepting a markdown file.
-                if fmt == FORMAT_MD and not _MD_CHAT_HEADER_RE.search(head):
-                    continue
-                preview = _peek(head, fmt)
-                cache[key] = {
-                    "mtime": stat.st_mtime,
-                    "fmt": fmt,
-                    "preview": preview,
-                }
-                cache_dirty = True
-            out.append(
-                ChatFile(path=path, fmt=fmt, mtime=stat.st_mtime, preview=preview)
-            )
+            candidates.append((path, stat.st_mtime))
+
+    # Phase 2: sort + cap before any expensive head reads.
+    candidates.sort(key=lambda t: t[1], reverse=True)
+    if max_files > 0 and len(candidates) > max_files:
+        dropped = len(candidates) - max_files
+        candidates = candidates[:max_files]
+    else:
+        dropped = 0
+
+    # Phase 3: fmt detect + peek on the surviving N (cache-backed).
+    cache = _load_cache()
+    cache_dirty = False
+    out: list[ChatFile] = []
+    for path, mtime in candidates:
+        key = str(path.resolve())
+        entry = cache.get(key)
+        fmt = ""
+        preview = ""
+        if isinstance(entry, dict) and entry.get("mtime") == mtime:
+            cached_fmt = entry.get("fmt")
+            if isinstance(cached_fmt, str):
+                fmt = cached_fmt
+                cached_preview = entry.get("preview")
+                preview = cached_preview if isinstance(cached_preview, str) else ""
+        if not fmt:
+            head = _read_head(path)
+            if not head.strip():
+                continue
+            fmt = detect_format(str(path), head)
+            if fmt == FORMAT_CLAUDEAI:
+                continue
+            # `detect_format` returns FORMAT_MD for *any* `.md` file
+            # by extension alone, so a stray README.md would otherwise
+            # leak in. Reuse the markdown parser's strict header regex
+            # (which requires the trailing colon) so docs like
+            # `## Human resources` don't false-match.
+            if fmt == FORMAT_MD and not MD_HEADER_RE.search(head):
+                continue
+            preview = _peek(head, fmt)
+            cache[key] = {
+                "mtime": mtime,
+                "fmt": fmt,
+                "preview": preview,
+            }
+            cache_dirty = True
+        out.append(ChatFile(path=path, fmt=fmt, mtime=mtime, preview=preview))
+
     if cache_dirty:
         _save_cache(cache)
-    out.sort(key=lambda c: c.mtime, reverse=True)
-    return out
-
-
-def cap_items(
-    items: list[ChatFile], max_files: int = DEFAULT_MAX_FILES
-) -> tuple[list[ChatFile], int]:
-    """Return (top `max_files` items by mtime desc, count of items dropped).
-
-    Items are already mtime-sorted by `walk_chat_files`. `max_files <= 0`
-    disables the cap.
-    """
-    if max_files <= 0 or len(items) <= max_files:
-        return items, 0
-    return items[:max_files], len(items) - max_files
+    return out, dropped
 
 
 def _format_row(item: ChatFile, name_w: int) -> str:
@@ -311,7 +340,7 @@ def run_picker(items: list[ChatFile]) -> list[ChatFile]:
     try:
         from pick import pick  # type: ignore[import-not-found]
     except ImportError as e:
-        raise RuntimeError(
+        raise PickerNotInstalled(
             "TUI picker requires the optional 'pick' package. "
             "Install with: pip install 'chat2html[tui]'  "
             "(or `uv pip install 'chat2html[tui]'`)"

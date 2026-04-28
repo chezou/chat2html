@@ -14,7 +14,6 @@ from chat2html.picker import (
     _peek_cc_jsonl,
     _peek_codex_jsonl,
     _peek_md,
-    cap_items,
     walk_chat_files,
 )
 
@@ -71,7 +70,8 @@ def test_walk_chat_files_filters_and_sorts(
     os.utime(md, (1_700_000_100, 1_700_000_100))
     os.utime(codex, (1_700_000_200, 1_700_000_200))
 
-    items = walk_chat_files(tmp_path)
+    items, dropped = walk_chat_files(tmp_path)
+    assert dropped == 0
 
     paths = [str(i.path.relative_to(tmp_path)) for i in items]
     # README.md and out.html are gone; .git/ is gone; empty file is gone;
@@ -87,6 +87,16 @@ def test_walk_chat_files_filters_and_sorts(
     assert previews["session.jsonl"].startswith("List the python files")
     assert previews["rollout.jsonl"].startswith("Refactor parse_users")
     assert previews["notes.md"].startswith("How do I reverse a list")
+
+
+def test_walk_chat_files_skips_non_chat_md(tmp_path):
+    # `## Human resources` should NOT match the strict markdown chat
+    # header regex (which requires the trailing colon).
+    (tmp_path / "doc.md").write_text(
+        "# Doc\n\n## Human resources\nSome bullet list.\n", encoding="utf-8"
+    )
+    items, dropped = walk_chat_files(tmp_path)
+    assert items == [] and dropped == 0
 
 
 def test_peek_cc_jsonl_skips_bare_slash_commands():
@@ -130,33 +140,57 @@ def test_walk_chat_files_respects_max_depth(tmp_path, cc_text):
     (tmp_path / "shallow.jsonl").write_text(cc_text, encoding="utf-8")
 
     # max_depth=0 → root files only.
-    items = walk_chat_files(tmp_path, max_depth=0)
+    items, _ = walk_chat_files(tmp_path, max_depth=0)
     assert [i.path.name for i in items] == ["shallow.jsonl"]
 
     # max_depth=2 → root + 2 levels, still misses deep.jsonl (depth 3).
-    items = walk_chat_files(tmp_path, max_depth=2)
+    items, _ = walk_chat_files(tmp_path, max_depth=2)
     assert [i.path.name for i in items] == ["shallow.jsonl"]
 
     # max_depth=3 → catches deep.jsonl too.
-    items = walk_chat_files(tmp_path, max_depth=3)
+    items, _ = walk_chat_files(tmp_path, max_depth=3)
     assert sorted(i.path.name for i in items) == ["deep.jsonl", "shallow.jsonl"]
 
 
-def test_cap_items():
-    from pathlib import Path
+def test_walk_chat_files_caps_max_files(tmp_path, cc_text, monkeypatch):
+    # 5 files with staggered mtimes; cap at 2 → keep newest 2, dropped=3.
+    for i in range(5):
+        f = tmp_path / f"s{i}.jsonl"
+        f.write_text(cc_text, encoding="utf-8")
+        os.utime(f, (1_700_000_000 + i, 1_700_000_000 + i))
 
-    from chat2html.picker import ChatFile
+    # Confirm the cap kicks in *before* head reads: count _read_head calls.
+    from chat2html import picker
 
-    items = [
-        ChatFile(path=Path(f"f{i}"), fmt="md", mtime=i, preview="")
-        for i in range(5)
-    ]
-    capped, dropped = cap_items(items, max_files=3)
-    assert len(capped) == 3 and dropped == 2
-    capped, dropped = cap_items(items, max_files=10)
-    assert capped == items and dropped == 0
-    capped, dropped = cap_items(items, max_files=0)  # 0 disables cap
-    assert capped == items and dropped == 0
+    real_read_head = picker._read_head
+    calls = {"n": 0}
+
+    def counting(*args, **kwargs):
+        calls["n"] += 1
+        return real_read_head(*args, **kwargs)
+
+    monkeypatch.setattr(picker, "_read_head", counting)
+
+    items, dropped = walk_chat_files(tmp_path, max_files=2)
+    assert [i.path.name for i in items] == ["s4.jsonl", "s3.jsonl"]
+    assert dropped == 3
+    # Only the 2 surviving files should have had their heads read.
+    assert calls["n"] == 2
+
+
+def test_walk_chat_files_tolerates_corrupt_cache(tmp_path, cc_text):
+    # A cache entry missing the "fmt" key (corrupted / hand-edited) must
+    # not crash; it should be treated as a cache miss and re-derived.
+    f = tmp_path / "s.jsonl"
+    f.write_text(cc_text, encoding="utf-8")
+    os.utime(f, (1_700_000_000, 1_700_000_000))
+
+    from chat2html import picker
+
+    picker._save_cache({str(f.resolve()): {"mtime": 1_700_000_000}})
+    items, _ = walk_chat_files(tmp_path)
+    assert len(items) == 1
+    assert items[0].fmt == FORMAT_CC_JSONL
 
 
 def test_walk_chat_files_caches_by_mtime(tmp_path, cc_text, monkeypatch):
@@ -181,6 +215,6 @@ def test_walk_chat_files_caches_by_mtime(tmp_path, cc_text, monkeypatch):
     cache[key]["preview"] = sentinel
     picker._save_cache(cache)
 
-    items = walk_chat_files(tmp_path)
+    items, _ = walk_chat_files(tmp_path)
     assert len(items) == 1
     assert items[0].preview == sentinel

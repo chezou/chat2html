@@ -141,20 +141,17 @@ def handle_directory(input_path: str, args: argparse.Namespace) -> None:
     only import it inside `run_picker` so the rest of the CLI keeps
     working without it.
     """
-    from .picker import cap_items, run_picker, walk_chat_files
+    from .picker import PickerNotInstalled, run_picker, walk_chat_files
 
     root = Path(input_path)
-    items = walk_chat_files(root, max_depth=args.depth)
+    items, dropped = walk_chat_files(
+        root, max_depth=args.depth, max_files=args.max_files
+    )
     if not items:
         print(t("cli_dir_no_files", path=input_path), file=sys.stderr)
         return
 
-    # Print the *pre-cap* total so the summary reflects what was actually
-    # detected under the directory; the truncation notice that follows
-    # tells the user how many were hidden by --max-files.
-    total = len(items)
-    items, dropped = cap_items(items, max_files=args.max_files)
-    print(t("cli_dir_summary", n=total, path=input_path))
+    print(t("cli_dir_summary", n=len(items), path=input_path))
     if dropped:
         print(
             t("cli_dir_truncated", dropped=dropped, cap=args.max_files),
@@ -166,7 +163,7 @@ def handle_directory(input_path: str, args: argparse.Namespace) -> None:
     else:
         try:
             selected = run_picker(items)
-        except RuntimeError:
+        except PickerNotInstalled:
             print(t("cli_picker_missing"), file=sys.stderr)
             sys.exit(1)
         except KeyboardInterrupt:
@@ -242,15 +239,29 @@ Examples:
     parser.add_argument(
         "--all",
         action="store_true",
-        help="convert all conversations (claude.ai export)",
+        help=(
+            "convert all conversations (claude.ai export) "
+            "or every detected log under the directory (directory mode)"
+        ),
     )
     # Defaults are sourced from chat2html.picker so the CLI help text
     # and the picker module can't drift apart.
     from .picker import DEFAULT_MAX_DEPTH, DEFAULT_MAX_FILES
 
+    def _non_negative_int(s: str) -> int:
+        try:
+            v = int(s)
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(f"expected integer, got {s!r}") from e
+        if v < 0:
+            raise argparse.ArgumentTypeError(
+                f"expected non-negative integer, got {v}"
+            )
+        return v
+
     parser.add_argument(
         "--depth",
-        type=int,
+        type=_non_negative_int,
         default=DEFAULT_MAX_DEPTH,
         help=(
             "directory mode: max recursion depth from the given root "
@@ -259,7 +270,7 @@ Examples:
     )
     parser.add_argument(
         "--max-files",
-        type=int,
+        type=_non_negative_int,
         default=DEFAULT_MAX_FILES,
         help=(
             "directory mode: cap the list at N most-recent files "
