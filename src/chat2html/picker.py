@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from pick import pick
+import pick as _pick
 
 from .format_detect import (
     FORMAT_CC_JSONL,
@@ -33,6 +33,12 @@ from .parsers.claude_code import (
 )
 from .parsers.codex import _codex_message_text
 from .parsers.markdown import MD_HEADER_RE
+
+# Extend pick's built-in select keys to also accept 'x'. pick already
+# binds j/k for movement (alongside arrows), so adding x as a toggle
+# lets users drive the picker entirely from the home row without
+# reaching for Space.
+_pick.KEYS_SELECT = (*_pick.KEYS_SELECT, ord("x"))
 
 # Cap on how much of each file we read for detect + peek. Big enough to
 # cover typical session preambles, small enough to keep walking a large
@@ -333,13 +339,13 @@ def run_picker(items: list[ChatFile]) -> list[ChatFile]:
     options = [_format_row(i, name_w) for i in items]
     title = (
         f"Select files to convert "
-        f"(↑↓ move, Space toggle, Enter confirm, q/Esc quit) "
+        f"(↑↓ move, Space/x toggle, Enter confirm, q/Esc quit) "
         f"— {len(items)} found"
     )
     # `pick` has no quit binding by default; wire q / Esc to abort.
     # In multiselect mode, hitting a quit key returns [] which the caller
     # treats as "user cancelled".
-    selected = pick(
+    selected = _pick.pick(
         options,
         title,
         multiselect=True,
