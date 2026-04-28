@@ -17,6 +17,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from pick import pick
+
 from .format_detect import (
     FORMAT_CC_JSONL,
     FORMAT_CLAUDEAI,
@@ -52,14 +54,6 @@ DEFAULT_MAX_FILES = 200
 # cached previews (e.g. literal "/clear" snippets, or empty entries from
 # an earlier "skip all slash commands" iteration) get re-derived.
 _CACHE_VERSION = 3
-
-
-class PickerNotInstalled(Exception):
-    """Raised by `run_picker` when the optional `pick` package is missing.
-
-    Distinct from a generic RuntimeError so the CLI can react to "install
-    the extra" without swallowing unrelated picker failures.
-    """
 
 
 @dataclass
@@ -333,19 +327,7 @@ def _format_row(item: ChatFile, name_w: int) -> str:
 
 
 def run_picker(items: list[ChatFile]) -> list[ChatFile]:
-    """Show a multi-select picker; return the selected items.
-
-    Raises RuntimeError if the optional `pick` package is not installed.
-    """
-    try:
-        from pick import pick  # type: ignore[import-not-found]
-    except ImportError as e:
-        raise PickerNotInstalled(
-            "TUI picker requires the optional 'pick' package. "
-            "Install with: pip install 'chat2html[tui]'  "
-            "(or `uv pip install 'chat2html[tui]'`)"
-        ) from e
-
+    """Show a multi-select picker; return the selected items."""
     if not items:
         return []
     name_w = min(40, max(len(i.path.name) for i in items))

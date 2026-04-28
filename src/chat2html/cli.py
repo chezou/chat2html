@@ -27,6 +27,12 @@ from .parsers import (
     parse_markdown,
 )
 from .parsers._common import _format_timestamp, _sanitize_filename
+from .picker import (
+    DEFAULT_MAX_DEPTH,
+    DEFAULT_MAX_FILES,
+    run_picker,
+    walk_chat_files,
+)
 from .template import to_html
 
 
@@ -136,13 +142,7 @@ def handle_claudeai_export(
 def handle_directory(input_path: str, args: argparse.Namespace) -> None:
     """Walk a directory for chat logs, then either batch-convert (`--all`)
     or launch the TUI picker for the user to pick a subset.
-
-    `pick` is an optional dependency installed via the `[tui]` extra; we
-    only import it inside `run_picker` so the rest of the CLI keeps
-    working without it.
     """
-    from .picker import PickerNotInstalled, run_picker, walk_chat_files
-
     root = Path(input_path)
     items, dropped = walk_chat_files(
         root, max_depth=args.depth, max_files=args.max_files
@@ -163,9 +163,6 @@ def handle_directory(input_path: str, args: argparse.Namespace) -> None:
     else:
         try:
             selected = run_picker(items)
-        except PickerNotInstalled:
-            print(t("cli_picker_missing"), file=sys.stderr)
-            sys.exit(1)
         except KeyboardInterrupt:
             print(t("cli_picker_aborted"), file=sys.stderr)
             return
@@ -244,9 +241,9 @@ Examples:
             "or every detected log under the directory (directory mode)"
         ),
     )
-    # Defaults are sourced from chat2html.picker so the CLI help text
-    # and the picker module can't drift apart.
-    from .picker import DEFAULT_MAX_DEPTH, DEFAULT_MAX_FILES
+    # `--depth` / `--max-files` defaults come from chat2html.picker
+    # (imported at module top) so the CLI help text and the picker
+    # module's own defaults can't drift apart.
 
     def _non_negative_int(s: str) -> int:
         try:

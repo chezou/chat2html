@@ -10,6 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "bleach>=6.0",
     "markdown>=3.5",
+    "pick>=2.4",
 ]
 license = "MIT"
 license-files = ["LICENSE"]
@@ -23,11 +24,6 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development",
     "Topic :: Text Processing :: Markup :: HTML",
-]
-
-[project.optional-dependencies]
-tui = [
-    "pick>=2.4",
 ]
 
 [project.scripts]

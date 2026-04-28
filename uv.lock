@@ -20,10 +20,6 @@ source = { editable = "." }
 dependencies = [
     { name = "bleach" },
     { name = "markdown" },
-]
-
-[package.optional-dependencies]
-tui = [
     { name = "pick" },
 ]
 
@@ -37,9 +33,8 @@ dev = [
 requires-dist = [
     { name = "bleach", specifier = ">=6.0" },
     { name = "markdown", specifier = ">=3.5" },
-    { name = "pick", marker = "extra == 'tui'", specifier = ">=2.4" },
+    { name = "pick", specifier = ">=2.4" },
 ]
-provides-extras = ["tui"]
 
 [package.metadata.requires-dev]
 dev = [

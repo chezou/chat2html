@@ -62,7 +62,7 @@ chat2html conversations.json --all -d out/
 # Batch multiple files (Markdown / Claude Code JSONL)
 chat2html a.md b.jsonl -d out/
 
-# Directory: pick logs interactively (requires the `[tui]` extra — see below)
+# Directory: pick logs interactively from a TUI list
 chat2html ~/.claude/projects/myproj -d out/
 
 # Directory: convert everything underneath without the picker
@@ -89,15 +89,6 @@ like `~/.claude` or `~/.codex`:
 - `--max-files N` — cap the list at the N most-recent files
   (`0` = no cap, default `200`). When entries are dropped, a notice is
   printed to stderr.
-
-The picker depends on the `pick` package, installed via the optional
-`[tui]` extra:
-
-```sh
-uv pip install 'chat2html[tui]'
-# or, for the uvx flow:
-uvx --from 'chat2html[tui]' chat2html ~/.claude/projects/myproj
-```
 
 ## Options
 
