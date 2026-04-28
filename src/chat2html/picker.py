@@ -2,10 +2,13 @@
 
 Walks a directory for `.md` / `.jsonl` files, drops anything that doesn't
 detect as a supported chat format, peeks the first user message for a
-preview snippet, then renders a multi-select list via `pick` (an
-optional `[tui]` extra). Previews are cached at
-`~/.cache/chat2html/previews.json` keyed by path + mtime so repeated
-runs over a big directory are instant.
+preview snippet, then renders a multi-select list via `pick`. Previews
+are cached at `~/.cache/chat2html/previews.json` keyed by path + mtime
+so repeated runs over a big directory are instant.
+
+Tab cycles through three column-focus modes (normal / filename /
+snippet) so the user can temporarily expand whichever column they need
+to actually read.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from pick import pick
+import pick as _pick
 
 from .format_detect import (
     FORMAT_CC_JSONL,
@@ -38,7 +41,10 @@ from .parsers.markdown import MD_HEADER_RE
 # cover typical session preambles, small enough to keep walking a large
 # directory snappy.
 _HEAD_BYTES = 256 * 1024
-_PEEK_MAX_LEN = 80
+# Upper bound on the cached preview length. Long enough that the
+# Tab-activated "snippet focus" mode has real text to expand into;
+# `_one_line` is what truncates per-display.
+_PEEK_MAX_LEN = 250
 _VALID_EXTS = (".md", ".markdown", ".jsonl")
 # Default cap on how many directory levels we descend from the root.
 # Big enough to cover ~/.codex/sessions/YYYY/MM/DD/file.jsonl (4 levels)
@@ -51,9 +57,10 @@ DEFAULT_MAX_DEPTH = 5
 # accumulated sessions can list thousands and slows the curses redraw.
 DEFAULT_MAX_FILES = 200
 # Bumped whenever fmt detection or peek logic changes so that previously
-# cached previews (e.g. literal "/clear" snippets, or empty entries from
-# an earlier "skip all slash commands" iteration) get re-derived.
-_CACHE_VERSION = 3
+# cached previews (e.g. literal "/clear" snippets, or 80-char-truncated
+# previews from before the snippet-focus mode bumped the cap to 250)
+# get re-derived.
+_CACHE_VERSION = 4
 
 
 @dataclass
@@ -311,41 +318,150 @@ def walk_chat_files(
     return out, dropped
 
 
-def _format_row(item: ChatFile, name_w: int) -> str:
-    # Show the basename only, not the relative path: the parent dir adds
-    # little signal in typical Claude Code / Codex layouts where every
-    # session sits in the same dir. Truncate the *tail* so the head of
-    # the filename (the meaningful prefix like a Codex `rollout-<date>`
-    # timestamp) stays visible.
-    name = item.path.name
-    if len(name) > name_w:
-        name = name[: name_w - 1] + "…"
-    name = name.ljust(name_w)
+FOCUS_MODES = ("normal", "filename", "snippet")
+# Width of the basename column in normal mode. Layout-driven so the
+# mtime and preview columns line up across rows. Not a display cap —
+# pick's `addnstr(line, max_x - 2)` already clips anything that runs
+# off the right edge of the terminal.
+_NORMAL_NAME_W = 40
+
+
+def _truncate_tail(s: str, width: int) -> str:
+    if len(s) > width:
+        return s[: width - 1] + "…"
+    return s
+
+
+def _format_row(
+    item: ChatFile,
+    focus: str = "normal",
+    root: Path | None = None,
+) -> str:
+    """Build one picker row, allocating columns per `focus` mode.
+
+    - `normal`   — `<basename(40)> <mtime> <preview>`. Basename is the
+                   only column we cap; everything else relies on pick's
+                   right-edge clipping to fit the terminal.
+    - `filename` — `<mtime> <relative-path>`. Path goes last so widening
+                   the terminal reveals more of the long session name.
+                   Uses the path relative to `root` (when given) so
+                   `proj-a/session.jsonl` and `proj-b/session.jsonl`
+                   are distinguishable; falls back to basename if the
+                   path is not under root.
+    - `snippet`  — `<mtime> <preview>`. Preview goes last for the same
+                   reason as filename focus, and the preview cache holds
+                   up to ~250 chars so widening pays off.
+
+    The "focused" column always sits at the end of the line so that as
+    the terminal grows the focused content becomes more visible without
+    any explicit width recomputation on our side.
+    """
     ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(item.mtime))
-    return f"{name}  {ts}  {item.preview}"
+
+    if focus == "filename":
+        if root is not None:
+            try:
+                display_name = str(item.path.relative_to(root))
+            except ValueError:
+                display_name = item.path.name
+        else:
+            display_name = item.path.name
+        return f"{ts}  {display_name}"
+
+    if focus == "snippet":
+        return f"{ts}  {item.preview}"
+
+    return (
+        f"{_truncate_tail(item.path.name, _NORMAL_NAME_W).ljust(_NORMAL_NAME_W)}  "
+        f"{ts}  {item.preview}"
+    )
 
 
-def run_picker(items: list[ChatFile]) -> list[ChatFile]:
-    """Show a multi-select picker; return the selected items."""
+class _FocusPicker(_pick.Picker):
+    """`pick.Picker` subclass that cycles a 3-state column focus on Tab.
+
+    Tab → normal → filename → snippet → normal → … . On each cycle we
+    rebuild `self.options` from the cached `ChatFile` list so the next
+    `draw()` picks up the new column allocation. `index` and
+    `selected_indexes` are preserved (the option *count* doesn't change
+    across modes, only the per-row strings).
+    """
+
+    def __init__(
+        self,
+        chat_files: list[ChatFile],
+        title: str,
+        root: Path | None = None,
+        **kwargs,
+    ):
+        self._chat_files = chat_files
+        self._root = root
+        self._focus = "normal"
+        super().__init__(options=self._render_rows(), title=title, **kwargs)
+
+    def _render_rows(self) -> list[str]:
+        return [_format_row(item, self._focus, self._root) for item in self._chat_files]
+
+    def _cycle_focus(self) -> None:
+        i = FOCUS_MODES.index(self._focus)
+        self._focus = FOCUS_MODES[(i + 1) % len(FOCUS_MODES)]
+        self.options = self._render_rows()
+
+    def run_loop(self, screen, position):
+        # Intercept Tab and `x` at the input boundary, then delegate the
+        # rest of the event loop (movement, enter, quit_keys, redraw) to
+        # `pick.Picker.run_loop` so any upstream key-handling additions
+        # are inherited automatically. Avoids both copy-pasting pick's
+        # loop body (brittle on upstream changes) and mutating pick's
+        # global `KEYS_SELECT` (a process-wide side effect that would
+        # leak into any other `pick` user in the same interpreter).
+        original_getch = screen.getch
+
+        def _intercepted_getch():
+            c = original_getch()
+            if c == ord("\t"):
+                self._cycle_focus()
+                # Return a sentinel pick's loop ignores; next iteration
+                # will redraw with the freshly rebuilt option strings.
+                return -1
+            if c == ord("x"):
+                # Translate to Space so pick's native KEYS_SELECT
+                # branch handles the toggle.
+                return ord(" ")
+            return c
+
+        screen.getch = _intercepted_getch
+        try:
+            return super().run_loop(screen, position)
+        finally:
+            screen.getch = original_getch
+
+
+def run_picker(items: list[ChatFile], root: Path | None = None) -> list[ChatFile]:
+    """Show a multi-select picker; return the selected items.
+
+    `root` is the walk root used to render relative paths when the user
+    focuses on the filename column (Tab cycle).
+    """
     if not items:
         return []
-    name_w = min(40, max(len(i.path.name) for i in items))
-    options = [_format_row(i, name_w) for i in items]
     title = (
         f"Select files to convert "
-        f"(↑↓ move, Space toggle, Enter confirm, q/Esc quit) "
+        f"(↑↓ move, Space/x toggle, Tab focus, Enter confirm, Esc/q quit) "
         f"— {len(items)} found"
     )
     # `pick` has no quit binding by default; wire q / Esc to abort.
     # In multiselect mode, hitting a quit key returns [] which the caller
     # treats as "user cancelled".
-    selected = pick(
-        options,
-        title,
+    picker = _FocusPicker(
+        chat_files=items,
+        title=title,
+        root=root,
         multiselect=True,
         min_selection_count=1,
         indicator="→",
         quit_keys=(ord("q"), 27),
     )
+    selected = picker.start()
     # multiselect returns list[(option, index)]; quit returns [].
     return [items[idx] for _, idx in selected]

@@ -10,6 +10,8 @@ from chat2html.format_detect import (
     FORMAT_MD,
 )
 from chat2html.picker import (
+    ChatFile,
+    _format_row,
     _one_line,
     _peek_cc_jsonl,
     _peek_codex_jsonl,
@@ -22,6 +24,77 @@ from chat2html.picker import (
 def isolated_cache(tmp_path, monkeypatch):
     """Keep the preview cache out of the user's home during tests."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+
+
+def _make_chatfile(
+    name: str = "session.jsonl", preview: str = "hi", mtime: float = 1_700_000_000
+) -> ChatFile:
+    from pathlib import Path
+
+    return ChatFile(path=Path(name), fmt="cc_jsonl", mtime=mtime, preview=preview)
+
+
+def test_format_row_normal_keeps_three_columns():
+    item = _make_chatfile(name="abc.jsonl", preview="first prompt")
+    row = _format_row(item, focus="normal")
+    # All three columns are present.
+    assert "abc.jsonl" in row
+    assert "first prompt" in row
+    # Filename column is left-padded so subsequent columns line up.
+    assert row.startswith("abc.jsonl" + " " * 31)
+
+
+def test_format_row_carries_full_preview_in_string():
+    # We don't truncate the preview at format time; pick's curses
+    # `addnstr` clips at the terminal's right edge at draw time, so the
+    # row string carries the full cached preview and a wider terminal
+    # naturally reveals more of it.
+    item = _make_chatfile(name="x.jsonl", preview="y" * 200)
+    assert _format_row(item, focus="normal").count("y") == 200
+    assert _format_row(item, focus="snippet").count("y") == 200
+
+
+def test_format_row_filename_focus_drops_preview_and_keeps_full_name(tmp_path):
+    # Filename focus drops the preview, exposes the path relative to
+    # the walk root (so `proj-a/...` and `proj-b/...` are
+    # distinguishable), and is *not* truncated at format time — a wider
+    # terminal reveals more of it via pick's natural clipping.
+    proj = tmp_path / "proj-a"
+    proj.mkdir()
+    sess = proj / "very-long-session-name.jsonl"
+    sess.touch()
+    item = ChatFile(
+        path=sess, fmt="cc_jsonl", mtime=0, preview="this should not appear"
+    )
+    row = _format_row(item, focus="filename", root=tmp_path)
+    assert "proj-a/very-long-session-name.jsonl" in row
+    assert "this should not appear" not in row
+    # Path goes last so growing the terminal expands the focused thing.
+    assert row.endswith("proj-a/very-long-session-name.jsonl")
+
+
+def test_format_row_snippet_focus_drops_filename():
+    item = _make_chatfile(name="abc.jsonl", preview="some preview text")
+    row = _format_row(item, focus="snippet")
+    assert "abc.jsonl" not in row
+    assert row.endswith("some preview text")
+
+
+def test_focus_picker_cycle_rotates_through_three_modes():
+    from chat2html.picker import FOCUS_MODES, _FocusPicker
+
+    items = [_make_chatfile(name=f"f{i}.jsonl") for i in range(3)]
+    picker = _FocusPicker(chat_files=items, title="t", multiselect=True)
+    assert picker._focus == "normal"
+    seen = [picker._focus]
+    for _ in range(len(FOCUS_MODES)):
+        picker._cycle_focus()
+        seen.append(picker._focus)
+    # After N cycles we're back to where we started.
+    assert seen[0] == seen[-1] == "normal"
+    assert set(seen) == set(FOCUS_MODES)
+    # Re-rendering keeps option count aligned with item count.
+    assert len(picker.options) == len(items)
 
 
 def test_one_line_collapses_whitespace_and_truncates():
