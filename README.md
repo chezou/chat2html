@@ -31,10 +31,10 @@ Share-conscious HTML exporter for AI coding-assistant conversations (Claude and 
 
 ## Quickstart
 
-Run directly from the GitHub repository with `uv` — no install required:
+Run directly from PyPI with `uv` — no install required:
 
 ```sh
-uv run --from git+https://github.com/chezou/chat2html chat2html session.jsonl
+uvx chat2html session.jsonl
 ```
 
 The examples below use `chat2html` as shorthand for the command above.
@@ -96,7 +96,7 @@ The picker depends on the `pick` package, installed via the optional
 ```sh
 uv pip install 'chat2html[tui]'
 # or, for the uvx flow:
-uv run --from 'git+https://github.com/chezou/chat2html#egg=chat2html[tui]' chat2html ~/.claude/projects/myproj
+uvx --from 'chat2html[tui]' chat2html ~/.claude/projects/myproj
 ```
 
 ## Options
