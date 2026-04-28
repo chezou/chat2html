@@ -145,6 +145,6 @@ uv run pre-commit install   # install the git hook (one-time per clone)
 
 `pre-commit` runs `ruff` (lint + format) and a few hygiene checks
 (trailing whitespace, EOF newline, TOML/YAML syntax, large-file guard)
-on every commit; see `.pre-commit-config.yaml`. CI runs the same
-`ruff check` + `pytest` on every push and PR
+on every commit; see `.pre-commit-config.yaml`. CI runs `ruff check`,
+`ruff format --check`, and `pytest` on every push and PR
 (see `.github/workflows/ci.yml`).
