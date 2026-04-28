@@ -149,8 +149,12 @@ def handle_directory(input_path: str, args: argparse.Namespace) -> None:
         print(t("cli_dir_no_files", path=input_path), file=sys.stderr)
         return
 
+    # Print the *pre-cap* total so the summary reflects what was actually
+    # detected under the directory; the truncation notice that follows
+    # tells the user how many were hidden by --max-files.
+    total = len(items)
     items, dropped = cap_items(items, max_files=args.max_files)
-    print(t("cli_dir_summary", n=len(items), path=input_path))
+    print(t("cli_dir_summary", n=total, path=input_path))
     if dropped:
         print(
             t("cli_dir_truncated", dropped=dropped, cap=args.max_files),
@@ -172,19 +176,18 @@ def handle_directory(input_path: str, args: argparse.Namespace) -> None:
             print(t("cli_picker_aborted"), file=sys.stderr)
             return
 
-    outdir = args.outdir or "."
-    os.makedirs(outdir, exist_ok=True)
+    outdir = Path(args.outdir or ".")
     for item in selected:
         try:
             rel = item.path.relative_to(root)
         except ValueError:
             rel = Path(item.path.name)
-        # Flatten subdirs into the output filename so two sessions with the
-        # same basename in different project dirs don't overwrite each other.
-        flat = str(rel).replace(os.sep, "_")
-        base = os.path.splitext(flat)[0]
-        out_path = os.path.join(outdir, base + ".html")
-        convert_single_file(str(item.path), out_path)
+        # Mirror the source directory structure under outdir so that
+        # `proj-a/session.jsonl` and `proj-b/session.jsonl` land at
+        # different paths. Flattening to underscores would silently
+        # collide on cases like `a/b_c.jsonl` vs `a_b/c.jsonl`.
+        out_path = (outdir / rel).with_suffix(".html")
+        convert_single_file(str(item.path), str(out_path))
 
 
 def main():
@@ -241,22 +244,26 @@ Examples:
         action="store_true",
         help="convert all conversations (claude.ai export)",
     )
+    # Defaults are sourced from chat2html.picker so the CLI help text
+    # and the picker module can't drift apart.
+    from .picker import DEFAULT_MAX_DEPTH, DEFAULT_MAX_FILES
+
     parser.add_argument(
         "--depth",
         type=int,
-        default=5,
+        default=DEFAULT_MAX_DEPTH,
         help=(
             "directory mode: max recursion depth from the given root "
-            "(0 = root only, default: 5)"
+            f"(0 = root only, default: {DEFAULT_MAX_DEPTH})"
         ),
     )
     parser.add_argument(
         "--max-files",
         type=int,
-        default=200,
+        default=DEFAULT_MAX_FILES,
         help=(
             "directory mode: cap the list at N most-recent files "
-            "(0 = no cap, default: 200)"
+            f"(0 = no cap, default: {DEFAULT_MAX_FILES})"
         ),
     )
     parser.add_argument(

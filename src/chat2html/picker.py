@@ -40,12 +40,13 @@ _VALID_EXTS = (".md", ".markdown", ".jsonl")
 # Default cap on how many directory levels we descend from the root.
 # Big enough to cover ~/.codex/sessions/YYYY/MM/DD/file.jsonl (4 levels)
 # from `~/.codex`, but small enough that pointing at `~/.claude` doesn't
-# unintentionally walk the whole home cache.
-_DEFAULT_MAX_DEPTH = 5
+# unintentionally walk the whole home cache. Public so the CLI can reuse
+# it for argparse defaults / help text.
+DEFAULT_MAX_DEPTH = 5
 # Default cap on how many entries we put in the picker. With 1 line per
 # file, ~200 is still scannable; running uncapped over years of
 # accumulated sessions can list thousands and slows the curses redraw.
-_DEFAULT_MAX_FILES = 200
+DEFAULT_MAX_FILES = 200
 # Bumped whenever fmt detection or peek logic changes so that previously
 # cached previews (e.g. literal "/clear" snippets, or empty entries from
 # an earlier "skip all slash commands" iteration) get re-derived.
@@ -201,7 +202,7 @@ def _save_cache(cache: dict) -> None:
 
 
 def walk_chat_files(
-    root: Path, max_depth: int = _DEFAULT_MAX_DEPTH
+    root: Path, max_depth: int = DEFAULT_MAX_DEPTH
 ) -> list[ChatFile]:
     """Find chat-log files under `root`, sorted by mtime descending.
 
@@ -212,7 +213,7 @@ def walk_chat_files(
 
     `max_depth` caps how many directory levels we descend from `root`:
     `0` = root only (no recursion), `1` = root + immediate subdirs, etc.
-    Default is `_DEFAULT_MAX_DEPTH`, picked to cover both Claude Code
+    Default is `DEFAULT_MAX_DEPTH`, picked to cover both Claude Code
     (`projects/<proj>/<sessionid>.jsonl`) and Codex
     (`sessions/YYYY/MM/DD/file.jsonl`) layouts without blowing up when
     the user points at their entire `~/.claude` or `~/.codex` tree.
@@ -276,7 +277,7 @@ def walk_chat_files(
 
 
 def cap_items(
-    items: list[ChatFile], max_files: int = _DEFAULT_MAX_FILES
+    items: list[ChatFile], max_files: int = DEFAULT_MAX_FILES
 ) -> tuple[list[ChatFile], int]:
     """Return (top `max_files` items by mtime desc, count of items dropped).
 
