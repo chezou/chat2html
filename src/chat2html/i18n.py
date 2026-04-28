@@ -80,7 +80,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 }
 
 # Current language. The CLI sets this from --lang at startup.
-_LANG: str = "ja"
+_LANG: str = "en"
 
 
 def t(key: str, **kwargs) -> str:
