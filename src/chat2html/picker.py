@@ -104,8 +104,7 @@ def _peek_cc_jsonl(text: str) -> str:
             return content
         if isinstance(content, list):
             if all(
-                isinstance(b, dict) and b.get("type") == "tool_result"
-                for b in content
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in content
             ):
                 continue
             parts = []

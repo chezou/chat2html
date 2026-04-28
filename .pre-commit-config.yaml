@@ -1,0 +1,23 @@
+# Run with: uv run pre-commit run --all-files
+# Install the git hook with: uv run pre-commit install
+#
+# `ruff autoupdate` pins the rev fields below to the latest tag.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-toml
+      - id: check-yaml
+      - id: check-added-large-files
+        # The directory-mode demo gif is ~1 MB; cap leaves headroom
+        # but still flags accidentally-committed multi-MB blobs.
+        args: [--maxkb=1500]

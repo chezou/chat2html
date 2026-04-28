@@ -24,12 +24,8 @@ LOCAL_COMMAND_RE = re.compile(
     r"^\s*<local-command-(?:caveat|stdout|stderr)>", re.DOTALL
 )
 
-_CC_COMMAND_NAME_RE = re.compile(
-    r"<command-name>\s*(.*?)\s*</command-name>", re.DOTALL
-)
-_CC_COMMAND_ARGS_RE = re.compile(
-    r"<command-args>\s*(.*?)\s*</command-args>", re.DOTALL
-)
+_CC_COMMAND_NAME_RE = re.compile(r"<command-name>\s*(.*?)\s*</command-name>", re.DOTALL)
+_CC_COMMAND_ARGS_RE = re.compile(r"<command-args>\s*(.*?)\s*</command-args>", re.DOTALL)
 
 
 def _parse_cc_slash_command(text: str) -> str | None:

@@ -251,9 +251,7 @@ Examples:
         except ValueError as e:
             raise argparse.ArgumentTypeError(f"expected integer, got {s!r}") from e
         if v < 0:
-            raise argparse.ArgumentTypeError(
-                f"expected non-negative integer, got {v}"
-            )
+            raise argparse.ArgumentTypeError(f"expected non-negative integer, got {v}")
         return v
 
     parser.add_argument(
