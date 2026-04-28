@@ -69,7 +69,5 @@ def parse_claudeai_conversation(conv: dict) -> tuple[str, str, list[Message]]:
         text = _extract_claudeai_message_text(msg)
         if not text.strip():
             continue
-        messages.append(
-            Message(role=role, timestamp=ts, blocks=[TextBlock(text=text)])
-        )
+        messages.append(Message(role=role, timestamp=ts, blocks=[TextBlock(text=text)]))
     return title, created, messages

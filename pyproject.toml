@@ -52,6 +52,7 @@ include = ["src/chat2html", "README.md", "LICENSE", "pyproject.toml"]
 
 [dependency-groups]
 dev = [
+    "pre-commit>=3.7",
     "pytest>=8.0",
     "ruff>=0.6",
 ]
