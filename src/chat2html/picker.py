@@ -37,12 +37,6 @@ from .parsers.claude_code import (
 from .parsers.codex import _codex_message_text
 from .parsers.markdown import MD_HEADER_RE
 
-# Extend pick's built-in select keys to also accept 'x'. pick already
-# binds j/k for movement (alongside arrows), so adding x as a toggle
-# lets users drive the picker entirely from the home row without
-# reaching for Space.
-_pick.KEYS_SELECT = (*_pick.KEYS_SELECT, ord("x"))
-
 # Cap on how much of each file we read for detect + peek. Big enough to
 # cover typical session preambles, small enough to keep walking a large
 # directory snappy.
@@ -417,33 +411,33 @@ class _FocusPicker(_pick.Picker):
         self.options = self._render_rows()
 
     def run_loop(self, screen, position):
-        # Body copied from pick.Picker.run_loop with an extra Tab
-        # handler in front. If pick adds new keys upstream this
-        # override needs to be refreshed.
-        while True:
-            self.draw(screen)
-            c = screen.getch()
+        # Intercept Tab and `x` at the input boundary, then delegate the
+        # rest of the event loop (movement, enter, quit_keys, redraw) to
+        # `pick.Picker.run_loop` so any upstream key-handling additions
+        # are inherited automatically. Avoids both copy-pasting pick's
+        # loop body (brittle on upstream changes) and mutating pick's
+        # global `KEYS_SELECT` (a process-wide side effect that would
+        # leak into any other `pick` user in the same interpreter).
+        original_getch = screen.getch
+
+        def _intercepted_getch():
+            c = original_getch()
             if c == ord("\t"):
                 self._cycle_focus()
-                continue
-            if self.quit_keys is not None and c in self.quit_keys:
-                if self.multiselect:
-                    return []
-                else:
-                    return None, -1
-            elif c in _pick.KEYS_UP:
-                self.move_up()
-            elif c in _pick.KEYS_DOWN:
-                self.move_down()
-            elif c in _pick.KEYS_ENTER:
-                if (
-                    self.multiselect
-                    and len(self.selected_indexes) < self.min_selection_count
-                ):
-                    continue
-                return self.get_selected()
-            elif c in _pick.KEYS_SELECT and self.multiselect:
-                self.mark_index()
+                # Return a sentinel pick's loop ignores; next iteration
+                # will redraw with the freshly rebuilt option strings.
+                return -1
+            if c == ord("x"):
+                # Translate to Space so pick's native KEYS_SELECT
+                # branch handles the toggle.
+                return ord(" ")
+            return c
+
+        screen.getch = _intercepted_getch
+        try:
+            return super().run_loop(screen, position)
+        finally:
+            screen.getch = original_getch
 
 
 def run_picker(
