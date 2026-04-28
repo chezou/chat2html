@@ -71,6 +71,8 @@ chat2html ~/.codex/sessions/2026/04 --all -d out/
 
 ### Directory mode (TUI picker)
 
+<video src="assets/chat2html_screen.mp4" controls width="700"></video>
+
 Pass a directory and chat2html will walk it for `.md` / `.jsonl` files,
 drop anything that isn't a supported chat log, and show a multi-select
 list (↑↓ to move, Space to toggle, Enter to confirm, `q` / Esc to quit).
