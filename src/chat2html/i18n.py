@@ -29,6 +29,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cli_err_unsupported": "未対応の形式: {fmt}",
         "cli_dir_no_files": "対応するチャットログが見つかりませんでした: {path}",
         "cli_dir_summary": "{n} 件のログを検出 ({path})",
+        "cli_dir_truncated": (
+            "  注意: {dropped} 件をリストから省略しました "
+            "(--max-files {cap}, 上限の調整は --max-files N)"
+        ),
         "cli_picker_aborted": "選択がキャンセルされました。",
         "cli_picker_missing": (
             "TUI ピッカーには 'pick' パッケージが必要です。"
@@ -65,6 +69,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cli_err_unsupported": "Unsupported format: {fmt}",
         "cli_dir_no_files": "No supported chat logs found under: {path}",
         "cli_dir_summary": "Found {n} log(s) under {path}",
+        "cli_dir_truncated": (
+            "  Note: {dropped} more file(s) hidden by --max-files {cap} "
+            "(raise with --max-files N)"
+        ),
         "cli_picker_aborted": "Selection cancelled.",
         "cli_picker_missing": (
             "TUI picker requires the optional 'pick' package. "

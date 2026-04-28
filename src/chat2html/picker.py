@@ -37,6 +37,19 @@ from .parsers.codex import _codex_message_text
 _HEAD_BYTES = 256 * 1024
 _PEEK_MAX_LEN = 80
 _VALID_EXTS = (".md", ".markdown", ".jsonl")
+# Default cap on how many directory levels we descend from the root.
+# Big enough to cover ~/.codex/sessions/YYYY/MM/DD/file.jsonl (4 levels)
+# from `~/.codex`, but small enough that pointing at `~/.claude` doesn't
+# unintentionally walk the whole home cache.
+_DEFAULT_MAX_DEPTH = 5
+# Default cap on how many entries we put in the picker. With 1 line per
+# file, ~200 is still scannable; running uncapped over years of
+# accumulated sessions can list thousands and slows the curses redraw.
+_DEFAULT_MAX_FILES = 200
+# Bumped whenever fmt detection or peek logic changes so that previously
+# cached previews (e.g. literal "/clear" snippets, or empty entries from
+# an earlier "skip all slash commands" iteration) get re-derived.
+_CACHE_VERSION = 3
 
 
 @dataclass
@@ -75,6 +88,13 @@ def _peek_cc_jsonl(text: str) -> str:
             if SLASH_COMMAND_RE.match(content) or LOCAL_COMMAND_RE.match(content):
                 cleaned = _parse_cc_slash_command(content)
                 if cleaned is None:
+                    continue
+                # Bare slash command (no args) like `/clear`, `/compact`,
+                # `/init` is housekeeping — skip and look for the next
+                # real message. Slash commands with args (e.g.
+                # `/asf-skills:stock-analysis 2025年のトヨタの株価推移`)
+                # carry the user's actual intent, so use them.
+                if " " not in cleaned:
                     continue
                 return cleaned
             return content
@@ -158,9 +178,12 @@ def _load_cache() -> dict:
     try:
         with open(_cache_path(), encoding="utf-8") as f:
             data = json.load(f)
-            return data if isinstance(data, dict) else {}
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}
+    if not isinstance(data, dict) or data.get("_version") != _CACHE_VERSION:
+        return {}
+    entries = data.get("entries")
+    return entries if isinstance(entries, dict) else {}
 
 
 def _save_cache(cache: dict) -> None:
@@ -168,24 +191,43 @@ def _save_cache(cache: dict) -> None:
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w", encoding="utf-8") as f:
-            json.dump(cache, f, ensure_ascii=False)
+            json.dump(
+                {"_version": _CACHE_VERSION, "entries": cache},
+                f,
+                ensure_ascii=False,
+            )
     except OSError:
         pass
 
 
-def walk_chat_files(root: Path) -> list[ChatFile]:
+def walk_chat_files(
+    root: Path, max_depth: int = _DEFAULT_MAX_DEPTH
+) -> list[ChatFile]:
     """Find chat-log files under `root`, sorted by mtime descending.
 
     Filters by extension (`.md` / `.markdown` / `.jsonl`), then runs
     `detect_format` on each candidate to drop unrelated files (e.g. a
     project README that happens to be `.md`). claude.ai exports are
     also dropped — they belong to the single-file workflow.
+
+    `max_depth` caps how many directory levels we descend from `root`:
+    `0` = root only (no recursion), `1` = root + immediate subdirs, etc.
+    Default is `_DEFAULT_MAX_DEPTH`, picked to cover both Claude Code
+    (`projects/<proj>/<sessionid>.jsonl`) and Codex
+    (`sessions/YYYY/MM/DD/file.jsonl`) layouts without blowing up when
+    the user points at their entire `~/.claude` or `~/.codex` tree.
     """
     cache = _load_cache()
     cache_dirty = False
     out: list[ChatFile] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        rel = os.path.relpath(dirpath, root)
+        depth = 0 if rel == "." else len(Path(rel).parts)
+        if depth >= max_depth:
+            # Capture files in this dir but stop descending.
+            dirnames[:] = []
+        else:
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         for name in filenames:
             if name.startswith("."):
                 continue
@@ -233,20 +275,34 @@ def walk_chat_files(root: Path) -> list[ChatFile]:
     return out
 
 
-def _format_row(item: ChatFile, root: Path, name_w: int) -> str:
-    try:
-        rel = item.path.relative_to(root)
-    except ValueError:
-        rel = item.path
-    name = str(rel)
+def cap_items(
+    items: list[ChatFile], max_files: int = _DEFAULT_MAX_FILES
+) -> tuple[list[ChatFile], int]:
+    """Return (top `max_files` items by mtime desc, count of items dropped).
+
+    Items are already mtime-sorted by `walk_chat_files`. `max_files <= 0`
+    disables the cap.
+    """
+    if max_files <= 0 or len(items) <= max_files:
+        return items, 0
+    return items[:max_files], len(items) - max_files
+
+
+def _format_row(item: ChatFile, name_w: int) -> str:
+    # Show the basename only, not the relative path: the parent dir adds
+    # little signal in typical Claude Code / Codex layouts where every
+    # session sits in the same dir. Truncate the *tail* so the head of
+    # the filename (the meaningful prefix like a Codex `rollout-<date>`
+    # timestamp) stays visible.
+    name = item.path.name
     if len(name) > name_w:
-        name = "…" + name[-(name_w - 1) :]
+        name = name[: name_w - 1] + "…"
     name = name.ljust(name_w)
     ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(item.mtime))
     return f"{name}  {ts}  {item.preview}"
 
 
-def run_picker(items: list[ChatFile], root: Path) -> list[ChatFile]:
+def run_picker(items: list[ChatFile]) -> list[ChatFile]:
     """Show a multi-select picker; return the selected items.
 
     Raises RuntimeError if the optional `pick` package is not installed.
@@ -263,7 +319,7 @@ def run_picker(items: list[ChatFile], root: Path) -> list[ChatFile]:
     if not items:
         return []
     name_w = min(40, max(len(i.path.name) for i in items))
-    options = [_format_row(i, root, name_w) for i in items]
+    options = [_format_row(i, name_w) for i in items]
     title = (
         f"Select files to convert "
         f"(↑↓ move, Space toggle, Enter confirm, q/Esc quit) "

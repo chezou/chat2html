@@ -141,21 +141,27 @@ def handle_directory(input_path: str, args: argparse.Namespace) -> None:
     only import it inside `run_picker` so the rest of the CLI keeps
     working without it.
     """
-    from .picker import run_picker, walk_chat_files
+    from .picker import cap_items, run_picker, walk_chat_files
 
     root = Path(input_path)
-    items = walk_chat_files(root)
+    items = walk_chat_files(root, max_depth=args.depth)
     if not items:
         print(t("cli_dir_no_files", path=input_path), file=sys.stderr)
         return
 
+    items, dropped = cap_items(items, max_files=args.max_files)
     print(t("cli_dir_summary", n=len(items), path=input_path))
+    if dropped:
+        print(
+            t("cli_dir_truncated", dropped=dropped, cap=args.max_files),
+            file=sys.stderr,
+        )
 
     if args.all:
         selected = items
     else:
         try:
-            selected = run_picker(items, root)
+            selected = run_picker(items)
         except RuntimeError:
             print(t("cli_picker_missing"), file=sys.stderr)
             sys.exit(1)
@@ -234,6 +240,24 @@ Examples:
         "--all",
         action="store_true",
         help="convert all conversations (claude.ai export)",
+    )
+    parser.add_argument(
+        "--depth",
+        type=int,
+        default=5,
+        help=(
+            "directory mode: max recursion depth from the given root "
+            "(0 = root only, default: 5)"
+        ),
+    )
+    parser.add_argument(
+        "--max-files",
+        type=int,
+        default=200,
+        help=(
+            "directory mode: cap the list at N most-recent files "
+            "(0 = no cap, default: 200)"
+        ),
     )
     parser.add_argument(
         "--lang",
