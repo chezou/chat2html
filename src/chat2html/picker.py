@@ -400,10 +400,7 @@ class _FocusPicker(_pick.Picker):
         super().__init__(options=self._render_rows(), title=title, **kwargs)
 
     def _render_rows(self) -> list[str]:
-        return [
-            _format_row(item, self._focus, self._root)
-            for item in self._chat_files
-        ]
+        return [_format_row(item, self._focus, self._root) for item in self._chat_files]
 
     def _cycle_focus(self) -> None:
         i = FOCUS_MODES.index(self._focus)
@@ -440,9 +437,7 @@ class _FocusPicker(_pick.Picker):
             screen.getch = original_getch
 
 
-def run_picker(
-    items: list[ChatFile], root: Path | None = None
-) -> list[ChatFile]:
+def run_picker(items: list[ChatFile], root: Path | None = None) -> list[ChatFile]:
     """Show a multi-select picker; return the selected items.
 
     `root` is the walk root used to render relative paths when the user
