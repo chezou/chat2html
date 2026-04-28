@@ -162,7 +162,7 @@ def handle_directory(input_path: str, args: argparse.Namespace) -> None:
         selected = items
     else:
         try:
-            selected = run_picker(items)
+            selected = run_picker(items, root=root)
         except KeyboardInterrupt:
             print(t("cli_picker_aborted"), file=sys.stderr)
             return
