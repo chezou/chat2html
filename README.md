@@ -75,7 +75,7 @@ chat2html ~/.codex/sessions/2026/04 --all -d out/
 
 Pass a directory and chat2html will walk it for `.md` / `.jsonl` files,
 drop anything that isn't a supported chat log, and show a multi-select
-list (↑↓ to move, Space to toggle, Enter to confirm, `q` / Esc to quit).
+list (↑↓ to move, Space / `x` to toggle, Enter to confirm, Esc / `q` to quit).
 Entries are sorted newest-first by mtime, with a one-line preview of
 the first user message (housekeeping slash-commands like `/clear` are
 skipped so they don't become the preview text). Combine with `--all` to

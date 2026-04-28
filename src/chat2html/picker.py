@@ -339,7 +339,7 @@ def run_picker(items: list[ChatFile]) -> list[ChatFile]:
     options = [_format_row(i, name_w) for i in items]
     title = (
         f"Select files to convert "
-        f"(↑↓ move, Space/x toggle, Enter confirm, q/Esc quit) "
+        f"(↑↓ move, Space/x toggle, Enter confirm, Esc/q quit) "
         f"— {len(items)} found"
     )
     # `pick` has no quit binding by default; wire q / Esc to abort.
