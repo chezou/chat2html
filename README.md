@@ -31,10 +31,10 @@ Share-conscious HTML exporter for AI coding-assistant conversations (Claude and 
 
 ## Quickstart
 
-Run directly from the GitHub repository with `uv` — no install required:
+Run directly from PyPI with `uv` — no install required:
 
 ```sh
-uv run --from git+https://github.com/chezou/chat2html chat2html session.jsonl
+uvx chat2html session.jsonl
 ```
 
 The examples below use `chat2html` as shorthand for the command above.
@@ -61,7 +61,34 @@ chat2html conversations.json --all -d out/
 
 # Batch multiple files (Markdown / Claude Code JSONL)
 chat2html a.md b.jsonl -d out/
+
+# Directory: pick logs interactively from a TUI list
+chat2html ~/.claude/projects/myproj -d out/
+
+# Directory: convert everything underneath without the picker
+chat2html ~/.codex/sessions/2026/04 --all -d out/
 ```
+
+### Directory mode (TUI picker)
+
+<img src="assets/chat2html_screen.gif" alt="chat2html directory mode TUI picker demo" width="700" />
+
+Pass a directory and chat2html will walk it for `.md` / `.jsonl` files,
+drop anything that isn't a supported chat log, and show a multi-select
+list (↑↓ to move, Space to toggle, Enter to confirm, `q` / Esc to quit).
+Entries are sorted newest-first by mtime, with a one-line preview of
+the first user message (housekeeping slash-commands like `/clear` are
+skipped so they don't become the preview text). Combine with `--all` to
+skip the picker and convert every log under the directory.
+
+Two safety caps keep the picker manageable when pointed at a deep tree
+like `~/.claude` or `~/.codex`:
+
+- `--depth N` — max recursion depth from the given root
+  (`0` = root only, default `5`).
+- `--max-files N` — cap the list at the N most-recent files
+  (`0` = no cap, default `200`). When entries are dropped, a notice is
+  printed to stderr.
 
 ## Options
 
@@ -71,7 +98,9 @@ chat2html a.md b.jsonl -d out/
 | `-d`, `--outdir` | Output directory. |
 | `-s`, `--search` | Search conversations by title (claude.ai export). |
 | `-i`, `--index` | Comma-separated indices to convert (claude.ai export, e.g. `0,2,5`). |
-| `--all` | Convert all conversations (claude.ai export). |
+| `--all` | Convert all conversations (claude.ai export) or every log under a directory (directory mode). |
+| `--depth N` | Directory mode: max recursion depth from the given root (`0` = root only, default: `5`). |
+| `--max-files N` | Directory mode: cap the picker list at the N most-recent files (`0` = no cap, default: `200`). |
 | `--lang {ja,en}` | Output language (default: `ja`). |
 | `--full` | Show full tool input/output. By default, `tool_result` is omitted and `tool_use` only shows description-like fields for safer sharing. OAuth-related URLs are always masked, even with `--full`. |
 

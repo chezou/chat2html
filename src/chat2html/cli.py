@@ -8,6 +8,7 @@ See README.md for usage.
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from . import __version__, i18n, render
 from .format_detect import (
@@ -26,6 +27,12 @@ from .parsers import (
     parse_markdown,
 )
 from .parsers._common import _format_timestamp, _sanitize_filename
+from .picker import (
+    DEFAULT_MAX_DEPTH,
+    DEFAULT_MAX_FILES,
+    run_picker,
+    walk_chat_files,
+)
 from .template import to_html
 
 
@@ -132,6 +139,51 @@ def handle_claudeai_export(
         print(f"  ✓ #{idx} → {filepath} ({len(messages)} msgs)")
 
 
+def handle_directory(input_path: str, args: argparse.Namespace) -> None:
+    """Walk a directory for chat logs, then either batch-convert (`--all`)
+    or launch the TUI picker for the user to pick a subset.
+    """
+    root = Path(input_path)
+    items, dropped = walk_chat_files(
+        root, max_depth=args.depth, max_files=args.max_files
+    )
+    if not items:
+        print(t("cli_dir_no_files", path=input_path), file=sys.stderr)
+        return
+
+    print(t("cli_dir_summary", n=len(items), path=input_path))
+    if dropped:
+        print(
+            t("cli_dir_truncated", dropped=dropped, cap=args.max_files),
+            file=sys.stderr,
+        )
+
+    if args.all:
+        selected = items
+    else:
+        try:
+            selected = run_picker(items)
+        except KeyboardInterrupt:
+            print(t("cli_picker_aborted"), file=sys.stderr)
+            return
+        if not selected:
+            print(t("cli_picker_aborted"), file=sys.stderr)
+            return
+
+    outdir = Path(args.outdir or ".")
+    for item in selected:
+        try:
+            rel = item.path.relative_to(root)
+        except ValueError:
+            rel = Path(item.path.name)
+        # Mirror the source directory structure under outdir so that
+        # `proj-a/session.jsonl` and `proj-b/session.jsonl` land at
+        # different paths. Flattening to underscores would silently
+        # collide on cases like `a/b_c.jsonl` vs `a_b/c.jsonl`.
+        out_path = (outdir / rel).with_suffix(".html")
+        convert_single_file(str(item.path), str(out_path))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -151,6 +203,10 @@ Examples:
   chat2html conversations.json -s "API"     # search by title
   chat2html conversations.json -i 0,3,7 -d out/
   chat2html conversations.json --all -d out/
+
+  # Directory: walk .md / .jsonl logs and pick interactively (needs [tui] extra)
+  chat2html ~/.claude/projects/myproj -d out/
+  chat2html ~/.codex/sessions/2026/04 --all -d out/
 """,
     )
     parser.add_argument(
@@ -159,7 +215,11 @@ Examples:
         action="version",
         version=f"%(prog)s {__version__}",
     )
-    parser.add_argument("files", nargs="+", help=".md / .jsonl / .json file(s)")
+    parser.add_argument(
+        "files",
+        nargs="+",
+        help=".md / .jsonl / .json file(s), or a directory for the TUI picker",
+    )
     parser.add_argument(
         "-o", "--output", help="output file path (single conversation only)"
     )
@@ -176,7 +236,43 @@ Examples:
     parser.add_argument(
         "--all",
         action="store_true",
-        help="convert all conversations (claude.ai export)",
+        help=(
+            "convert all conversations (claude.ai export) "
+            "or every detected log under the directory (directory mode)"
+        ),
+    )
+    # `--depth` / `--max-files` defaults come from chat2html.picker
+    # (imported at module top) so the CLI help text and the picker
+    # module's own defaults can't drift apart.
+
+    def _non_negative_int(s: str) -> int:
+        try:
+            v = int(s)
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(f"expected integer, got {s!r}") from e
+        if v < 0:
+            raise argparse.ArgumentTypeError(
+                f"expected non-negative integer, got {v}"
+            )
+        return v
+
+    parser.add_argument(
+        "--depth",
+        type=_non_negative_int,
+        default=DEFAULT_MAX_DEPTH,
+        help=(
+            "directory mode: max recursion depth from the given root "
+            f"(0 = root only, default: {DEFAULT_MAX_DEPTH})"
+        ),
+    )
+    parser.add_argument(
+        "--max-files",
+        type=_non_negative_int,
+        default=DEFAULT_MAX_FILES,
+        help=(
+            "directory mode: cap the list at N most-recent files "
+            f"(0 = no cap, default: {DEFAULT_MAX_FILES})"
+        ),
     )
     parser.add_argument(
         "--lang",
@@ -208,6 +304,10 @@ Examples:
 
     # Detect and process each file one by one.
     for input_path in args.files:
+        if os.path.isdir(input_path):
+            handle_directory(input_path, args)
+            continue
+
         with open(input_path, encoding="utf-8") as f:
             text = f.read()
         fmt = detect_format(input_path, text)
