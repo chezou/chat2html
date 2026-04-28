@@ -275,8 +275,8 @@ Examples:
     parser.add_argument(
         "--lang",
         choices=["ja", "en"],
-        default="ja",
-        help="output language (default: ja)",
+        default="en",
+        help="output language (default: en)",
     )
     parser.add_argument(
         "--full",

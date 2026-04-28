@@ -101,7 +101,7 @@ like `~/.claude` or `~/.codex`:
 | `--all` | Convert all conversations (claude.ai export) or every log under a directory (directory mode). |
 | `--depth N` | Directory mode: max recursion depth from the given root (`0` = root only, default: `5`). |
 | `--max-files N` | Directory mode: cap the picker list at the N most-recent files (`0` = no cap, default: `200`). |
-| `--lang {ja,en}` | Output language (default: `ja`). |
+| `--lang {ja,en}` | Output language (default: `en`). |
 | `--full` | Show full tool input/output. By default, `tool_result` is omitted and `tool_use` only shows description-like fields for safer sharing. OAuth-related URLs are always masked, even with `--full`. |
 
 ## ⚠️ What chat2html does NOT protect against
