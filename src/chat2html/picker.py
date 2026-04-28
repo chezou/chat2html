@@ -266,14 +266,19 @@ def run_picker(items: list[ChatFile], root: Path) -> list[ChatFile]:
     options = [_format_row(i, root, name_w) for i in items]
     title = (
         f"Select files to convert "
-        f"(↑↓ move, Space toggle, Enter confirm) — {len(items)} found"
+        f"(↑↓ move, Space toggle, Enter confirm, q/Esc quit) "
+        f"— {len(items)} found"
     )
+    # `pick` has no quit binding by default; wire q / Esc to abort.
+    # In multiselect mode, hitting a quit key returns [] which the caller
+    # treats as "user cancelled".
     selected = pick(
         options,
         title,
         multiselect=True,
         min_selection_count=1,
         indicator="→",
+        quit_keys=(ord("q"), 27),
     )
-    # multiselect returns list[(option, index)]
+    # multiselect returns list[(option, index)]; quit returns [].
     return [items[idx] for _, idx in selected]
