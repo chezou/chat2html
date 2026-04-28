@@ -61,6 +61,30 @@ chat2html conversations.json --all -d out/
 
 # Batch multiple files (Markdown / Claude Code JSONL)
 chat2html a.md b.jsonl -d out/
+
+# Directory: pick logs interactively (requires the `[tui]` extra — see below)
+chat2html ~/.claude/projects/myproj -d out/
+
+# Directory: convert everything underneath without the picker
+chat2html ~/.codex/sessions/2026/04 --all -d out/
+```
+
+### Directory mode (TUI picker)
+
+Pass a directory and chat2html will walk it for `.md` / `.jsonl` files,
+drop anything that isn't a supported chat log, and show a multi-select
+list (↑↓ to move, Space to toggle, Enter to confirm). Entries are sorted
+newest-first by mtime, with a one-line preview of the first user
+message. Combine with `--all` to skip the picker and convert every log
+under the directory.
+
+The picker depends on the `pick` package, installed via the optional
+`[tui]` extra:
+
+```sh
+uv pip install 'chat2html[tui]'
+# or, for the uvx flow:
+uv run --from 'git+https://github.com/chezou/chat2html#egg=chat2html[tui]' chat2html ~/.claude/projects/myproj
 ```
 
 ## Options

@@ -27,6 +27,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cli_err_invalid_index": "エラー: -i には数字をカンマ区切りで指定してください。",  # noqa: E501
         "cli_err_claudeai_format": "{path} は claude.ai エクスポート形式です。 -i / --all / -s を使ってください。",  # noqa: E501
         "cli_err_unsupported": "未対応の形式: {fmt}",
+        "cli_dir_no_files": "対応するチャットログが見つかりませんでした: {path}",
+        "cli_dir_summary": "{n} 件のログを検出 ({path})",
+        "cli_picker_aborted": "選択がキャンセルされました。",
+        "cli_picker_missing": (
+            "TUI ピッカーには 'pick' パッケージが必要です。"
+            " `pip install 'chat2html[tui]'` でインストールしてください。"
+        ),
         "cli_done": "完了！",
         "omitted_badge": "omitted",
         "omitted_result_label": "結果は共有のため省略（--full で表示）",
@@ -56,6 +63,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cli_err_invalid_index": "Error: -i requires comma-separated integers.",
         "cli_err_claudeai_format": "{path} is a claude.ai export. Use -i / --all / -s.",
         "cli_err_unsupported": "Unsupported format: {fmt}",
+        "cli_dir_no_files": "No supported chat logs found under: {path}",
+        "cli_dir_summary": "Found {n} log(s) under {path}",
+        "cli_picker_aborted": "Selection cancelled.",
+        "cli_picker_missing": (
+            "TUI picker requires the optional 'pick' package. "
+            "Install with: pip install 'chat2html[tui]'"
+        ),
         "cli_done": "Done!",
         "omitted_badge": "omitted",
         "omitted_result_label": "Result omitted for sharing (use --full to show)",

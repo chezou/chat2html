@@ -25,6 +25,11 @@ classifiers = [
     "Topic :: Text Processing :: Markup :: HTML",
 ]
 
+[project.optional-dependencies]
+tui = [
+    "pick>=2.4",
+]
+
 [project.scripts]
 chat2html = "chat2html.cli:main"
 

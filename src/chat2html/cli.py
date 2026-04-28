@@ -8,6 +8,7 @@ See README.md for usage.
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from . import __version__, i18n, render
 from .format_detect import (
@@ -132,6 +133,54 @@ def handle_claudeai_export(
         print(f"  ✓ #{idx} → {filepath} ({len(messages)} msgs)")
 
 
+def handle_directory(input_path: str, args: argparse.Namespace) -> None:
+    """Walk a directory for chat logs, then either batch-convert (`--all`)
+    or launch the TUI picker for the user to pick a subset.
+
+    `pick` is an optional dependency installed via the `[tui]` extra; we
+    only import it inside `run_picker` so the rest of the CLI keeps
+    working without it.
+    """
+    from .picker import run_picker, walk_chat_files
+
+    root = Path(input_path)
+    items = walk_chat_files(root)
+    if not items:
+        print(t("cli_dir_no_files", path=input_path), file=sys.stderr)
+        return
+
+    print(t("cli_dir_summary", n=len(items), path=input_path))
+
+    if args.all:
+        selected = items
+    else:
+        try:
+            selected = run_picker(items, root)
+        except RuntimeError:
+            print(t("cli_picker_missing"), file=sys.stderr)
+            sys.exit(1)
+        except KeyboardInterrupt:
+            print(t("cli_picker_aborted"), file=sys.stderr)
+            return
+        if not selected:
+            print(t("cli_picker_aborted"), file=sys.stderr)
+            return
+
+    outdir = args.outdir or "."
+    os.makedirs(outdir, exist_ok=True)
+    for item in selected:
+        try:
+            rel = item.path.relative_to(root)
+        except ValueError:
+            rel = Path(item.path.name)
+        # Flatten subdirs into the output filename so two sessions with the
+        # same basename in different project dirs don't overwrite each other.
+        flat = str(rel).replace(os.sep, "_")
+        base = os.path.splitext(flat)[0]
+        out_path = os.path.join(outdir, base + ".html")
+        convert_single_file(str(item.path), out_path)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -151,6 +200,10 @@ Examples:
   chat2html conversations.json -s "API"     # search by title
   chat2html conversations.json -i 0,3,7 -d out/
   chat2html conversations.json --all -d out/
+
+  # Directory: walk .md / .jsonl logs and pick interactively (needs [tui] extra)
+  chat2html ~/.claude/projects/myproj -d out/
+  chat2html ~/.codex/sessions/2026/04 --all -d out/
 """,
     )
     parser.add_argument(
@@ -159,7 +212,11 @@ Examples:
         action="version",
         version=f"%(prog)s {__version__}",
     )
-    parser.add_argument("files", nargs="+", help=".md / .jsonl / .json file(s)")
+    parser.add_argument(
+        "files",
+        nargs="+",
+        help=".md / .jsonl / .json file(s), or a directory for the TUI picker",
+    )
     parser.add_argument(
         "-o", "--output", help="output file path (single conversation only)"
     )
@@ -208,6 +265,10 @@ Examples:
 
     # Detect and process each file one by one.
     for input_path in args.files:
+        if os.path.isdir(input_path):
+            handle_directory(input_path, args)
+            continue
+
         with open(input_path, encoding="utf-8") as f:
             text = f.read()
         fmt = detect_format(input_path, text)
